@@ -1,0 +1,8 @@
+*.o
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+benchmark_curl_wrapper
+curl_m3u8
+
