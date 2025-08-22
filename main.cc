@@ -97,14 +97,22 @@ int main(int argc, char** argv)
 
     //curl_m3u8.default_progress_meter(true);
 
-    /*std::vector<std::string> urls {
-      "https://arteptweb-vh.akamaihd.net/i/am/ptweb/083000/083900/083960-000-A_0_VA-STA_AMM-PTWEB_XQ.1FPwq1DStxq.smil/segment1_1_av.ts",
-      "https://arteptweb-vh.akamaihd.net/i/am/ptweb/083000/083900/083960-000-A_0_VA-STA_AMM-PTWEB_XQ.1FPwq1DStxq.smil/segment2_1_av.ts",
-      "https://arteptweb-vh.akamaihd.net/i/am/ptweb/083000/083900/083960-000-A_0_VA-STA_AMM-PTWEB_XQ.1FPwq1DStxq.smil/segment3_1_av.ts",
-      "https://arteptweb-vh.akamaihd.net/i/am/ptweb/083000/083900/083960-000-A_0_VA-STA_AMM-PTWEB_XQ.1FPwq1DStxq.smil/segment4_1_av.ts"
-      };*/
+    std::vector<std::string> urls {
+      "https://thrivecrafthub.xyz/content/bf67dda69364fd0f313ddde22e1cf777/9e523ae15b61dc766f5c818726881ecf/page-0.html",
+      "https://thrivecrafthub.xyz/content/bf67dda69364fd0f313ddde22e1cf777/9e523ae15b61dc766f5c818726881ecf/page-1.html",
+      "https://thrivecrafthub.xyz/content/bf67dda69364fd0f313ddde22e1cf777/9e523ae15b61dc766f5c818726881ecf/page-2.html",
+      "https://thrivecrafthub.xyz/content/bf67dda69364fd0f313ddde22e1cf777/9e523ae15b61dc766f5c818726881ecf/page-3.html",
+      "https://thrivecrafthub.xyz/content/bf67dda69364fd0f313ddde22e1cf777/9e523ae15b61dc766f5c818726881ecf/page-4.html",
+      "https://thrivecrafthub.xyz/content/bf67dda69364fd0f313ddde22e1cf777/9e523ae15b61dc766f5c818726881ecf/page-5.html",
+    };
 
-    //curl_m3u8.download_files(urls);
+    std::vector<std::tuple<std::filesystem::path, std::string>> pathurls;
+    for(auto url : urls)
+    {
+      pathurls.push_back(std::make_tuple(curl_wrapper::get_filename_from_url(url), url));
+    }
+
+    curl_m3u8.download_files(pathurls);
 
     curl_wrapper::cleanup();
   }

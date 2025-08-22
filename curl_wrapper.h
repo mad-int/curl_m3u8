@@ -11,7 +11,9 @@ class curl_wrapper_error
 {
   public:
 
-    explicit curl_wrapper_error(std::string const& msg) : msg_(msg) {}
+    explicit curl_wrapper_error(std::string const& msg, std::string const& filename = "")
+      : m_msg(msg), m_filename(filename)
+    {}
     virtual ~curl_wrapper_error() = default;
 
     curl_wrapper_error(curl_wrapper_error const&) = default;
@@ -19,12 +21,18 @@ class curl_wrapper_error
 
     virtual const char* what() const noexcept
     {
-      return msg_.c_str();
+      return m_msg.c_str();
+    }
+
+    virtual std::string filename() const noexcept
+    {
+      return m_filename;
     }
 
   private:
 
-    std::string const msg_;
+    std::string const m_msg;
+    std::string const m_filename;
 };
 
 
@@ -41,6 +49,11 @@ class curl_wrapper
     static void init();     // Call before curl_wrapper-usage (not thread-safe)!
     static void cleanup();  // Call after  curl_wrapper-usage (not thread-safe)!
 
+    struct results_t
+    {
+      std::vector<std::filesystem::path> succeeded_files;
+      std::vector<curl_wrapper_error> errors;
+    };
 
   public:
 
@@ -62,17 +75,21 @@ class curl_wrapper
 
   public:
 
-    //! Synchronously download url to path.
-    auto download_file(std::filesystem::path const& path, std::string const& url) const -> std::variant<std::filesystem::path, curl_wrapper_error>;
+    //! Download url to path.
+    auto download_file(std::filesystem::path const& path, std::string const& url) const
+      -> std::variant<std::filesystem::path, curl_wrapper_error>;
 
-    //! Synchronously download url to a buffer.
-    auto download_buffer(std::string const& url) const -> std::variant<std::vector<byte_t>, curl_wrapper_error>;
+    //! Download url to a buffer.
+    auto download_buffer(std::string const& url) const
+      -> std::variant<std::vector<byte_t>, curl_wrapper_error>;
+
+    //! Downloads a bunch of urls to paths.
+    auto download_files(std::vector<std::tuple<std::filesystem::path, std::string>> const pathurls) -> results_t;
 
     static auto get_filename_from_url(std::string const& url) -> std::string;
 
 
   public:
-
 
     void useragent(std::string const& ua)
     {
