@@ -35,7 +35,6 @@ class curl_wrapper_error
     std::string const m_filename;
 };
 
-
 /**
  * Before using curl_wrapper call curl_wrapper::init()
  * and after usage call curl_wrapper::cleanup().
@@ -44,10 +43,11 @@ class curl_wrapper
 {
   public:
 
-    typedef char byte_t;
-
     static void init();     // Call before curl_wrapper-usage (not thread-safe)!
     static void cleanup();  // Call after  curl_wrapper-usage (not thread-safe)!
+
+    using byte_t = char;
+    using pathurl_t = std::tuple<std::filesystem::path, std::string>;
 
     struct results_t
     {
@@ -84,7 +84,7 @@ class curl_wrapper
       -> std::variant<std::vector<byte_t>, curl_wrapper_error>;
 
     //! Downloads a bunch of urls to paths.
-    auto download_files(std::vector<std::tuple<std::filesystem::path, std::string>> const pathurls) -> results_t;
+    auto download_files(std::vector<pathurl_t> const pathurls) -> results_t;
 
     static auto get_filename_from_url(std::string const& url) -> std::string;
 
@@ -112,7 +112,6 @@ class curl_wrapper
 
 
   private:
-
 
     std::string m_useragent;
     bool m_verbose_flag = false;
