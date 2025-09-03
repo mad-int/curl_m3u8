@@ -18,8 +18,22 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 
 find_package(CURL REQUIRED)
 
-add_executable(curl_m3u8 main.cc curl_wrapper.cc)
+add_executable(curl_m3u8 main.cc curl_wrapper.cc progressmeter.cc)
 target_link_libraries(curl_m3u8 CURL::libcurl)
+
+add_executable(progressmeter_check progressmeter_check.cc progressmeter.cc)
+
+# ---
+
+find_package(GTest REQUIRED)
+add_executable(testrunner progressmeter_test.cc progressmeter.cc)
+target_link_libraries(testrunner GTest::GTest GTest::Main)
+
+add_custom_target(test
+  COMMAND testrunner
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  VERBATIM
+)
 
 # ---
 

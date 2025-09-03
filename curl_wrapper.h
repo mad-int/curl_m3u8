@@ -106,15 +106,15 @@ class curl_wrapper
     void clear_verbose()  { m_verbose_flag = false; }
     bool verbose() const  { return m_verbose_flag; }
 
-    void set_default_progress_meter()   { m_default_progress_meter = true; }
-    void clear_default_progress_meter() { m_default_progress_meter = false; }
-    bool default_progress_meter() const { return m_default_progress_meter; }
+    void set_default_progressmeter()   { m_default_progressmeter = true; }
+    void clear_default_progressmeter() { m_default_progressmeter = false; }
+    bool default_progressmeter() const { return m_default_progressmeter; }
 
 
   private:
 
     std::string m_useragent;
     bool m_verbose_flag = false;
-    bool m_default_progress_meter = false;
+    bool m_default_progressmeter = false;
 };
 

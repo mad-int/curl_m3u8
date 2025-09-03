@@ -1,3 +1,4 @@
+#include <cstring> // strerror()
 #include <format>
 #include <iostream>
 #include <iterator>
@@ -5,8 +6,6 @@
 #include <ranges>
 #include <string>
 #include <variant>
-
-#include <cstring> // strerror()
 
 #include <getopt.h>
 
@@ -53,7 +52,7 @@ int main(int argc, char** argv)
     curl_wrapper curl_m3u8;
     if(cmdline.verbose_flag)
       curl_m3u8.set_verbose();
-    //curl_m3u8.set_default_progress_meter();
+    // curl_m3u8.set_default_progressmeter();
 
     std::string const url = cmdline.url;
     std::string const file = "index.m3u8"; // curl_m3u8.get_filename_from_url(url);
@@ -95,7 +94,7 @@ int main(int argc, char** argv)
     // start async operations of the chunks
     //
 
-    //curl_m3u8.default_progress_meter(true);
+    curl_m3u8.set_default_progressmeter();
 
     std::vector<std::string> urls {
       "https://thrivecrafthub.xyz/content/bf67dda69364fd0f313ddde22e1cf777/9e523ae15b61dc766f5c818726881ecf/page-0.html",
