@@ -1,7 +1,9 @@
 #include <cassert>
 #include <cstring> // strerror, strncpy
 #include <format>
+#include <fstream> // ifstream
 #include <memory> // std::shared_ptr
+#include <optional>
 #include <regex>
 #include <string>
 #include <vector>
@@ -37,6 +39,8 @@ namespace
   auto curl_multi_add_handle(CURLM* multi_handle, curl_context_t const& context, std::filesystem::path const& path,
       int index, download_process_t* process) -> std::variant<curl_handle_t, curl_wrapper_error>;
   auto curl_multi_handle_message(CURLM* multi_handle, CURLMsg* m) -> std::tuple<CURLcode, size_t>;
+
+  auto verify_file(std::filesystem::path const& path) -> std::optional<curl_wrapper_error>;
 
   void curl_easy_setup(CURL* handle, curl_context_t const& context, curl_write_callback callback, void* userdata);
 
@@ -196,6 +200,7 @@ auto curl_wrapper::download_files(std::vector<pathurl_t> const pathurls)
   // Run as long there are active handles or there are handles still waiting.
   while(active_handles > 0 or i<pathurls.size())
   {
+    // Make handles active (up to max_active_handles).
     while(active_handles < max_active_handles and i<pathurls.size())
     {
       auto [path, url] = pathurls[i];
@@ -231,11 +236,27 @@ auto curl_wrapper::download_files(std::vector<pathurl_t> const pathurls)
     while(CURLMsg* msg = curl_multi_info_read(multi_handle.get(), &msgs_in_queue))
     {
       auto [errorcode, index] = curl_multi_handle_message(multi_handle.get(), msg);
-      curl_handle_t handle = std::move(handles[index]);
-      auto path = handle.m_path;
+
+      std::filesystem::path path;
+      {
+        curl_handle_t handle = std::move(handles[index]);
+        path = handle.m_path;
+      }
 
       if(errorcode  == CURLE_OK)
+      {
+        // verify_file() is only possible after handle is destroyed
+        // (and dues its file-handles written and closed).
+        auto optional_error = verify_file(path);
+        if(optional_error.has_value())
+        {
+          results.errors.push_back(optional_error.value());
+          return results;
+        }
+        // else
+
         results.succeeded_files.push_back(path);
+      }
       else
         results.errors.push_back( curl_wrapper_error{curl_easy_strerror(errorcode), path} );
 
@@ -253,6 +274,9 @@ auto curl_wrapper::download_files(std::vector<pathurl_t> const pathurls)
       results.errors.push_back( curl_wrapper_error{curl_multi_strerror(res)} );
       return results;
     }
+
+    if(timeout == -1) // No timeout set. This happens!?
+      timeout = 0;
 
     // ... then wait.
     int numfds = 0;
@@ -329,6 +353,41 @@ namespace
     return std::make_tuple(CURLE_OK, -1);
   }
 
+  auto verify_file(std::filesystem::path const& path) -> std::optional<curl_wrapper_error>
+  {
+    std::error_code errc;
+    auto const size = std::filesystem::file_size(path, errc);
+
+    if(errc)
+      return curl_wrapper_error{errc.message(), path};
+
+    if(size <= 1'024) // 1 KB - too small something went wrong
+    {
+      // To small probably the server returned an error code like
+      // > error code: 1015
+      // (which is rate limit exceeded).
+      // I got this sometimes.
+
+      std::ifstream file{path};
+      if(file.fail())
+      {
+        int const err = errno;
+        errc = std::error_code{err, std::generic_category()};
+        return curl_wrapper_error{std::format("Couldn't open file after download: {}", errc.message()), path};
+      }
+
+      std::string line = "";
+      std::getline(file, line);
+
+      if(line.find("error code: 1015") != std::string::npos)
+        return curl_wrapper_error{"rate limit exceeded", path};
+
+      return curl_wrapper_error{line, path};
+    }
+
+    return {};
+  }
+
 } // namespace
 
 auto curl_wrapper::get_filename_from_url(std::string const& surl) -> std::string
@@ -371,6 +430,9 @@ namespace
     curl_easy_setopt(handle, CURLOPT_USERAGENT,   context.useragent.c_str());
     curl_easy_setopt(handle, CURLOPT_VERBOSE,     context.verbose_flag ? 1 : 0);
     curl_easy_setopt(handle, CURLOPT_NOPROGRESS,  context.default_progressmeter ? 0 : 1);
+
+    curl_off_t const maxrecv = 1*1'024*1'024; // max receive speed 1MB/s
+    curl_easy_setopt(handle, CURLOPT_MAX_RECV_SPEED_LARGE, maxrecv);
 
     // https://curl.se/libcurl/c/CURLOPT_WRITEFUNCTION.html
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, userdata); // set userdata
