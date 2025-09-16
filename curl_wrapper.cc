@@ -423,6 +423,8 @@ namespace
       return false;
     }
 
+    curl_easy_setopt(m_handle, CURLOPT_ERRORBUFFER, m_errbuf);
+
     return true;
   }
 
