@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.31)
 project(curl_m3u8)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(CMAKE_BUILD_TYPE Debug) # Change to Release if you want a release-build.
@@ -18,15 +18,17 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 
 find_package(CURL REQUIRED)
 
-add_executable(curl_m3u8 main.cc curl_wrapper.cc progressmeter.cc)
+add_executable(curl_m3u8 main.cc curl_wrapper.cc progressmeter.cc m3u8.cc)
 target_link_libraries(curl_m3u8 CURL::libcurl)
 
 add_executable(progressmeter_check progressmeter_check.cc progressmeter.cc)
 
+add_executable(m3u8_check m3u8_check.cc m3u8.cc)
+
 # ---
 
 find_package(GTest REQUIRED)
-add_executable(testrunner progressmeter_test.cc progressmeter.cc)
+add_executable(testrunner progressmeter_test.cc progressmeter.cc m3u8_test.cc m3u8.cc string_util_test.cc)
 target_link_libraries(testrunner GTest::GTest GTest::Main)
 
 add_custom_target(test

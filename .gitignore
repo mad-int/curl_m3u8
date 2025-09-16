@@ -5,6 +5,7 @@ cmake_install.cmake
 Makefile
 benchmark_curl_wrapper
 curl_m3u8
+m3u8_check
 progressmeter_check
 tags
 testrunner

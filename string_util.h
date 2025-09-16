@@ -1,15 +1,12 @@
 #pragma once
 
 #include <algorithm> // std::find_if
-#include <sstream>
 #include <string>
 
 #include <cassert>
 
-//
-
 /**
- * Left and right trim sting \p s.
+ * Trim a string left and right.
  */
 static inline std::string trim(std::string s)
 {
@@ -26,131 +23,32 @@ static inline std::string trim(std::string s)
   return s;
 }
 
-//
-
 /**
- * Formated output conversion with std::string.
+ * Tokenize a string according to a given delimiter (default: ',').
  *
- * Implements a subset of sprintf() with std::string.
- * The result is returned as std::string.
+ * Empty tokens are discared. The tokens are not trimmed.
  */
-template<typename... Args>
-std::string strprintf(const std::string format, Args... args);
-
-/**
- * Formated output conversion with std::stringstream.
- *
- * Implements a subset of sprintf() with std::stringstream \p ss.
- * The result is the std::stringsteam \p ss returned as std::string (via ss.str()).
- */
-template<typename T, typename... Args>
-std::string ssprintf(std::stringstream& ss, const std::string format, const T first, Args... args);
-
-/**
- * Formated output conversion with std::stringstream.
- *
- * Implements a subset of sprintf() with std::stringstream \p ss.
- * The result is the std::stringsteam \p ss returned as std::string (via ss.str()).
- */
-static inline std::string ssprintf(std::stringstream& ss, std::string format);
-
-//
-
-template<typename... Args>
-std::string strprintf(const std::string format, Args... args)
+static inline auto tokenize(std::string s, char delim = ',') -> std::vector<std::string>
 {
-  std::stringstream ss;
-  return ssprintf(ss, format, args...);
-}
+  std::vector<std::string> ret = {};
 
-template<typename T, typename... Args>
-std::string ssprintf(std::stringstream& ss,
-    std::string format, const T first, Args... args)
-{
-  size_t pos = 0;
-  while((pos = format.find("%")) != std::string::npos)
+  size_t prev = 0, pos = s.find(delim, 0);
+  while(pos != std::string::npos)
   {
-    assert(pos+1 < format.length());
+    std::string token = s.substr(prev, pos - prev);
+    if(not token.empty())
+      ret.push_back(token);
 
-    if(format[pos+1] != '%')
-      break;
-    // else -> found "%%"
-
-    const std::string start = format.substr(0, pos);
-    ss << start << '%';
-
-    format = format.substr(pos+2);
+    prev = pos+1;
+    pos = s.find(delim, pos+1);
   }
 
-  assert(pos != std::string::npos);
-  assert(pos+1 < format.length());
-
-  const std::string start = format.substr(0, pos);
-  const std::string end = format.substr(pos+2);
-
-  switch(format[pos+1])
-  {
-    case '%': // "%%" -> '%'
-      ss << start << '%';
-      break;
-
-    case 'c': // "%c"
-      assert(std::is_integral<T>::value);
-      char c;
-      {
-        std::stringstream str;
-        str << first;
-        str >> c;
-      }
-      ss << start << c;
-      break;
-
-    case 'd': // "%d"
-      assert(std::is_integral<T>::value);
-      ss << start << std::dec << first;
-      break;
-
-    case 'x': // "%x"
-      assert(std::is_integral<T>::value);
-      ss << start << std::hex << std::showbase << first;
-      break;
-
-    case 'X': // "%X"
-      assert(std::is_integral<T>::value);
-      ss << start << std::hex << std::showbase << std::uppercase << first;
-      break;
-
-    case 'o': // "%o"
-      assert(std::is_integral<T>::value);
-      ss << start << std::oct << std::showbase << first;
-      break;
-
-    case 's': // "%s"
-      ss << start << first;
-      break;
-
-    default: // unknown conversion specifier
-      assert(false);
+  { // pos == std::string::npos
+    std::string token = s.substr(prev);
+    if(not token.empty())
+      ret.push_back(token);
   }
 
-  return ssprintf(ss, format.substr(pos+2), args...);
-}
-
-static std::string ssprintf(std::stringstream& ss, std::string format)
-{
-  size_t pos = 0;
-  while((pos = format.find("%")) != std::string::npos)
-  {
-    assert(pos+1 < format.length());
-    assert(format[pos+1] == '%'); // No conversion specifiers are allowed, only "%%".
-
-    const std::string start = format.substr(0, pos);
-    ss << start << '%';
-
-    format = format.substr(pos+2);
-  }
-
-  ss << format;
-  return ss.str();
+  return ret;
 }
 
