@@ -1,3 +1,4 @@
+// GPL-3.0-or-later (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <variant>

@@ -1,3 +1,4 @@
+// GPL-3.0-or-later (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 #pragma once
 
 #include <algorithm> // std::find_if
