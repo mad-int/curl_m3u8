@@ -86,27 +86,99 @@ namespace
     bool default_progressmeter;
   };
 
-  auto append_file(curl_wrapper::byte_t* ptr, size_t size, size_t nmemb, void* userdata) -> size_t
+  void curl_easy_setup(CURL* handle, curl_context_t const& context,
+      curl_write_callback callback, void* userdata)
   {
-    return fwrite(ptr, size, nmemb, reinterpret_cast<FILE*>(userdata));
+    assert(callback != nullptr);
+    assert(userdata != nullptr);
+
+    curl_easy_setopt(handle, CURLOPT_URL,         context.url.c_str());
+    curl_easy_setopt(handle, CURLOPT_USERAGENT,   context.useragent.c_str());
+    curl_easy_setopt(handle, CURLOPT_VERBOSE,     context.verbose_flag ? 1 : 0);
+    curl_easy_setopt(handle, CURLOPT_NOPROGRESS,  context.default_progressmeter ? 0 : 1);
+
+    curl_off_t const maxrecv = 1*1'024*1'024; // max receive speed 1MB/s
+    curl_easy_setopt(handle, CURLOPT_MAX_RECV_SPEED_LARGE, maxrecv);
+
+    // https://curl.se/libcurl/c/CURLOPT_WRITEFUNCTION.html
+    curl_easy_setopt(handle, CURLOPT_WRITEDATA, userdata); // set userdata
+    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, callback);
   }
 
-  auto append_buffer(curl_wrapper::byte_t* ptr, size_t size, size_t nmemb, void* userdata) -> size_t
+  curl_handle_t::curl_handle_t(curl_handle_t&& other)
+    : m_handle(other.m_handle), m_errbuf(other.m_errbuf), m_path(other.m_path), m_fh(other.m_fh)
   {
-    auto buffer = reinterpret_cast<std::vector<curl_wrapper::byte_t>*>(userdata);
-    size_t const size_old = buffer->size();
-    buffer->reserve(buffer->size() + nmemb*size);
-    buffer->insert(buffer->end(), ptr, ptr + nmemb*size);
-    return buffer->size() - size_old;
+    other.m_handle = nullptr;
+    other.m_errbuf = nullptr;
+    other.m_path = "";
+    other.m_fh = nullptr;
   }
 
-  int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)
+  curl_handle_t::~curl_handle_t()
   {
-    download_process_t* process = static_cast<download_process_t*>(clientp);
-    process->update(dltotal, dlnow);
-    return 0;
+    if(m_handle != nullptr)
+      curl_easy_cleanup(m_handle);
+
+    if(m_errbuf != nullptr)
+      delete [] m_errbuf;
+
+    if(m_fh != nullptr)
+      fclose(m_fh);
   }
-}
+
+  auto curl_handle_t::operator=(curl_handle_t&& other) -> curl_handle_t&
+  {
+    std::swap(m_handle, other.m_handle);
+    std::swap(m_errbuf, other.m_errbuf);
+    std::swap(m_path, other.m_path);
+    std::swap(m_fh, other.m_fh);
+
+    return *this;
+  }
+
+  bool curl_handle_t::init()
+  {
+    m_errbuf = new char [CURL_ERROR_SIZE];
+    if(m_errbuf == nullptr)
+      return false;
+    m_errbuf[0] = '\0';
+    m_errbuf[CURL_ERROR_SIZE-1] = '\0';
+
+    m_handle = curl_easy_init();
+    if(m_handle == nullptr)
+    {
+      strncpy(m_errbuf, "Initialising curl handle failed", CURL_ERROR_SIZE-1);
+      return false;
+    }
+
+    curl_easy_setopt(m_handle, CURLOPT_ERRORBUFFER, m_errbuf);
+
+    return true;
+  }
+
+  bool curl_handle_t::init(std::filesystem::path const& path)
+  {
+    bool success = init();
+    if(not success)
+      return false;
+
+    m_fh = fopen(path.c_str(), "w");
+    if(m_fh == nullptr)
+    {
+      int const err = errno;
+      std::string const errormsg = std::format("Can't open file `{}' for writing: {}", path.c_str(), strerror(err));
+      strncpy(m_errbuf, errormsg.c_str(), CURL_ERROR_SIZE-1);
+      return false;
+    }
+
+    m_path = path;
+
+    return true;
+  }
+
+} // namespace
+
+// ---
 
 auto curl_wrapper::download_file(std::filesystem::path const& path, std::string const& url) const
   -> std::variant<std::filesystem::path, curl_wrapper_error>
@@ -421,95 +493,29 @@ auto curl_wrapper::get_filename_from_url(std::string const& surl) -> std::string
 
 namespace
 {
-  void curl_easy_setup(CURL* handle, curl_context_t const& context,
-      curl_write_callback callback, void* userdata)
+  //
+  // Callbacks
+  //
+
+  auto append_file(curl_wrapper::byte_t* ptr, size_t size, size_t nmemb, void* userdata) -> size_t
   {
-    assert(callback != nullptr);
-    assert(userdata != nullptr);
-
-    curl_easy_setopt(handle, CURLOPT_URL,         context.url.c_str());
-    curl_easy_setopt(handle, CURLOPT_USERAGENT,   context.useragent.c_str());
-    curl_easy_setopt(handle, CURLOPT_VERBOSE,     context.verbose_flag ? 1 : 0);
-    curl_easy_setopt(handle, CURLOPT_NOPROGRESS,  context.default_progressmeter ? 0 : 1);
-
-    curl_off_t const maxrecv = 1*1'024*1'024; // max receive speed 1MB/s
-    curl_easy_setopt(handle, CURLOPT_MAX_RECV_SPEED_LARGE, maxrecv);
-
-    // https://curl.se/libcurl/c/CURLOPT_WRITEFUNCTION.html
-    curl_easy_setopt(handle, CURLOPT_WRITEDATA, userdata); // set userdata
-    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, callback);
+    return fwrite(ptr, size, nmemb, reinterpret_cast<FILE*>(userdata));
   }
 
-  curl_handle_t::curl_handle_t(curl_handle_t&& other)
-    : m_handle(other.m_handle), m_errbuf(other.m_errbuf), m_path(other.m_path), m_fh(other.m_fh)
+  auto append_buffer(curl_wrapper::byte_t* ptr, size_t size, size_t nmemb, void* userdata) -> size_t
   {
-    other.m_handle = nullptr;
-    other.m_errbuf = nullptr;
-    other.m_path = "";
-    other.m_fh = nullptr;
+    auto buffer = reinterpret_cast<std::vector<curl_wrapper::byte_t>*>(userdata);
+    size_t const size_old = buffer->size();
+    buffer->reserve(buffer->size() + nmemb*size);
+    buffer->insert(buffer->end(), ptr, ptr + nmemb*size);
+    return buffer->size() - size_old;
   }
 
-  curl_handle_t::~curl_handle_t()
+  int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)
   {
-    if(m_handle != nullptr)
-      curl_easy_cleanup(m_handle);
-
-    if(m_errbuf != nullptr)
-      delete [] m_errbuf;
-
-    if(m_fh != nullptr)
-      fclose(m_fh);
+    download_process_t* process = static_cast<download_process_t*>(clientp);
+    process->update(dltotal, dlnow);
+    return 0;
   }
-
-  auto curl_handle_t::operator=(curl_handle_t&& other) -> curl_handle_t&
-  {
-    std::swap(m_handle, other.m_handle);
-    std::swap(m_errbuf, other.m_errbuf);
-    std::swap(m_path, other.m_path);
-    std::swap(m_fh, other.m_fh);
-
-    return *this;
-  }
-
-  bool curl_handle_t::init()
-  {
-    m_errbuf = new char [CURL_ERROR_SIZE];
-    if(m_errbuf == nullptr)
-      return false;
-    m_errbuf[0] = '\0';
-    m_errbuf[CURL_ERROR_SIZE-1] = '\0';
-
-    m_handle = curl_easy_init();
-    if(m_handle == nullptr)
-    {
-      strncpy(m_errbuf, "Initialising curl handle failed", CURL_ERROR_SIZE-1);
-      return false;
-    }
-
-    curl_easy_setopt(m_handle, CURLOPT_ERRORBUFFER, m_errbuf);
-
-    return true;
-  }
-
-  bool curl_handle_t::init(std::filesystem::path const& path)
-  {
-    bool success = init();
-    if(not success)
-      return false;
-
-    m_fh = fopen(path.c_str(), "w");
-    if(m_fh == nullptr)
-    {
-      int const err = errno;
-      std::string const errormsg = std::format("Can't open file `{}' for writing: {}", path.c_str(), strerror(err));
-      strncpy(m_errbuf, errormsg.c_str(), CURL_ERROR_SIZE-1);
-      return false;
-    }
-
-    m_path = path;
-
-    return true;
-  }
-
 } // namespace
 
