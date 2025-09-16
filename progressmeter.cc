@@ -3,6 +3,7 @@
 #include <algorithm> // std::find_if
 #include <format>
 #include <iostream> // std::cout, std::cerr
+#include <vector>
 
 #include <sys/ioctl.h>
 #include <unistd.h> // STDOUT_FILENO
@@ -216,7 +217,9 @@ auto format_line(download_process_intern_t const& process, int const length) -> 
   // transfer-speed
   // e.g. 463,0 KiB/s
   auto const [speed, speed_unit] = calc_avg_speed(process.transfered_list);
-  std::string const speed_str = std::format("{:5.1f} {:>5}", speed, speed_unit);
+  std::string const speed_str = speed == -1.0
+    ? std::format(  "  -.- {:>5}", speed_unit)
+    : std::format("{:5.1f} {:>5}", speed, speed_unit);
 
   // percentage completed
   std::string percent_str = process.finished ? "100%" : "---%";
@@ -261,23 +264,27 @@ auto format_line(download_process_intern_t const& process, int const length) -> 
 
 auto calc_avg_speed(std::list<std::tuple<system_clock::time_point, size_t>> transfered_list) -> std::tuple<double, std::string>
 {
-  size_t avg = 0;
-  if(transfered_list.size() >= 2)
+  bool const avg_speed_exists = (transfered_list.size() >= 2);
+
+  // TODO: make it work also with a size() of 1 => assume duration is 1s from the start.
+
+  size_t avg_speed = 0;
+  if(avg_speed_exists)
   {
     auto const [last_time, last_transfered] = *(transfered_list.rbegin());
     auto const [before_last_time, before_last_transfered] = *(++transfered_list.rbegin());
 
-    assert(last_time > before_last_time and "duration should be greater 0s (something around atleast 1s)");
+    assert(last_time > before_last_time and "duration should be greater 0s (something around at least 1s)");
     assert(last_transfered >= before_last_transfered and "transfered bytes only grows");
 
     double const duration_last = std::chrono::duration<double>(last_time - before_last_time).count();
     size_t const transfered_diff = last_transfered - before_last_transfered;
 
-    avg = static_cast<size_t>(static_cast<double>(transfered_diff) / duration_last);
+    avg_speed = static_cast<size_t>(static_cast<double>(transfered_diff) / duration_last);
   }
 
-  auto const [quantity, unit] = shorten_bytes(avg);
-  return std::make_tuple(quantity, unit+"/s");
+  auto const [quantity, unit] = shorten_bytes(avg_speed_exists ? avg_speed : 0);
+  return std::make_tuple(avg_speed_exists ? quantity : -1.0, unit+"/s");
 }
 
 auto calc_progressbar_filled(size_t const transfered, size_t const total, size_t const barlength) -> std::string

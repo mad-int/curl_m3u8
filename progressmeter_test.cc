@@ -2,7 +2,7 @@
 
 #include "progressmeter.h"
 
-TEST(progressmetertests, shorten_bytes)
+TEST(progressmeter_tests, shorten_bytes)
 {
   auto [bytes, bytes_unit] = shorten_bytes(876);
   EXPECT_EQ(bytes, 876.0);
@@ -21,7 +21,7 @@ TEST(progressmetertests, shorten_bytes)
   EXPECT_EQ(gbytes_unit, "GiB");
 }
 
-TEST(progressmetertests, calc_progressbar_filled)
+TEST(progressmeter_tests, calc_progressbar_filled)
 {
   std::string progressbar0   = calc_progressbar_filled(  0, 100, 40);
   std::string progressbar50  = calc_progressbar_filled( 50, 100, 40);
@@ -32,7 +32,7 @@ TEST(progressmetertests, calc_progressbar_filled)
   EXPECT_EQ(progressbar100, std::string{"########################################"});
 }
 
-TEST(progressmetertests, calc_progressbar_undefined)
+TEST(progressmeter_tests, calc_progressbar_undefined)
 {
   std::string progressbar0  = calc_progressbar_undefined( 0, "<->", 40);
   std::string progressbar1  = calc_progressbar_undefined( 1, "<->", 40);

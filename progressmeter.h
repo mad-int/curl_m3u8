@@ -28,7 +28,7 @@ public:
 private:
 
   std::mutex m_mutex;
-  std::list<download_process_t> m_processes = {};
+  std::list<download_process_t> m_processes = {}; // currently running processes
 
   int m_last_printed_lines = 0;
   std::chrono::system_clock::time_point m_last = std::chrono::system_clock::now();
