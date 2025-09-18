@@ -18,8 +18,8 @@ struct process_t
 
   size_t transfered = 0;
   size_t total = 0;
-  std::optional<size_t> avg_speed = {};
 
+  std::list<std::tuple<std::chrono::system_clock::time_point, size_t>> transfered_list = {std::make_tuple(start, 0)};
   bool is_finished = false;
 };
 
@@ -95,8 +95,6 @@ private:
 
   int const m_id;
   process_t m_process;
-
-  std::list<std::tuple<std::chrono::system_clock::time_point, size_t>> m_transfered_list = {};
 };
 
 // Internal functions exposed for testing.

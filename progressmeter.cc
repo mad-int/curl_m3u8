@@ -30,11 +30,12 @@ auto format_totalline(process_t const& main_process, size_t const finished, size
 auto format_line(std::string name, size_t transfered_bytes, std::optional<size_t> avg_speed,
     std::chrono::milliseconds const& duration, double percent, int const length) -> std::string;
 
+static void transfered_list_push_back(process_t& process, size_t transfered);
+
 // ---
 
 download_process_t::download_process_t(int id, std::string const& name)
   : m_mutex{}, m_id{id}, m_process{name, std::chrono::system_clock::now()}
-  , m_transfered_list({std::make_tuple(m_process.start, 0)})
 {
 }
 
@@ -45,31 +46,20 @@ void download_process_t::update(size_t total, size_t transfered)
   m_process.transfered = transfered;
   m_process.total = total;
 
-  auto const now = system_clock::now();
-
-  if((now - std::get<0>(m_transfered_list.back())) > 1s)
-  {
-    m_transfered_list.push_back(std::make_tuple(now, transfered));
-    while(m_transfered_list.size() > 5) // only keep the last 5 records
-      m_transfered_list.pop_front();
-  }
+  transfered_list_push_back(m_process, transfered);
 }
 
 auto download_process_t::copy() -> std::tuple<int, process_t>
 {
   int id;
   process_t process;
-  decltype(m_transfered_list) transfered_list = {};
 
   { // critical copy-section
     std::lock_guard<std::mutex> guard(m_mutex);
 
     id = m_id;
     process = m_process;
-    transfered_list = m_transfered_list;
   }
-
-  process.avg_speed = calc_avg_speed(transfered_list);
 
   return std::make_tuple(id, process);
 }
@@ -144,7 +134,6 @@ void progressmeter_t::print()
 
     // copy m_main_process
     main_process = m_main_process;
-    size_t avg_speed = 0;
     bool with_unknown_totals = false;
 
     // copy m_processes
@@ -166,15 +155,11 @@ void progressmeter_t::print()
       main_process.transfered += p.transfered;
       main_process.total += p.total;
 
-      if(p.avg_speed.has_value())
-        avg_speed += p.avg_speed.value();
-
       if(p.total == 0)
         with_unknown_totals = true;
     }
 
-    if(avg_speed != 0)
-      main_process.avg_speed = avg_speed;
+    transfered_list_push_back(main_process, main_process.transfered);
 
     // If one is unknown the overall total is unknown.
     if(with_unknown_totals)
@@ -242,6 +227,8 @@ auto format_line(process_t const& process, int const length) -> std::string
 {
   assert(process.total >= 0);
 
+  auto const avg_speed = calc_avg_speed(process.transfered_list);
+
   using namespace std::chrono;
   milliseconds const duration = duration_cast<milliseconds>(system_clock::now() - process.start);
 
@@ -251,7 +238,7 @@ auto format_line(process_t const& process, int const length) -> std::string
   else if(process.total > 0)
     percent = static_cast<double>(process.transfered)/static_cast<double>(process.total);
 
-  return format_line(process.name, process.transfered, process.avg_speed, duration, percent, length);
+  return format_line(process.name, process.transfered, avg_speed, duration, percent, length);
 }
 
 /**
@@ -268,6 +255,8 @@ auto format_totalline(process_t const& main_process, size_t const finished, size
   size_t const len = calc_numberlength(total);
   std::string const name = std::format("total ({0:{2}}/{1:{2}})", finished, total, len);
 
+  auto const avg_speed = calc_avg_speed(main_process.transfered_list);
+
   using namespace std::chrono;
   milliseconds const duration = duration_cast<milliseconds>(system_clock::now() - main_process.start);
 
@@ -275,7 +264,7 @@ auto format_totalline(process_t const& main_process, size_t const finished, size
     ? static_cast<double>(finished)/static_cast<double>(total)
     : 1.0;
 
-  return format_line(name, main_process.transfered, main_process.avg_speed, duration, percent,
+  return format_line(name, main_process.transfered, avg_speed, duration, percent,
       length);
 }
 
@@ -352,7 +341,8 @@ auto format_line(std::string name, size_t transfered_bytes, std::optional<size_t
 
 auto calc_avg_speed(std::list<std::tuple<system_clock::time_point, size_t>> transfered_list) -> std::optional<size_t>
 {
-  // TODO: make it work also with a size() of 1 => assume duration is 1s from the start.
+  // The first entry of the transfered_list it (start-time, 0),
+  // so two entries are needed for calculating the avg. speed.
   if(transfered_list.size() >= 2)
   {
     auto const [last_time, last_transfered] = *(transfered_list.rbegin());
@@ -461,5 +451,17 @@ auto calc_numberlength(size_t number) -> size_t
   }
 
   return len;
+}
+
+void transfered_list_push_back(process_t& process, size_t transfered)
+{
+  auto const now = system_clock::now();
+
+  if((now - std::get<0>(process.transfered_list.back())) > 1s)
+  {
+    process.transfered_list.push_back(std::make_tuple(now, transfered));
+    while(process.transfered_list.size() > 5) // only keep the last 5 records
+      process.transfered_list.pop_front();
+  }
 }
 
