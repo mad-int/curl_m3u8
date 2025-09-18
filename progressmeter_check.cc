@@ -21,14 +21,17 @@ namespace
 
 int main()
 {
+  int const number_of_threads = 10;
+
   progressmeter_t progress;
+  progress.set_number_of_downloads(number_of_threads);
 
   std::vector<download_process_t*> downloads = {};
   std::vector<std::thread> threads = {};
 
   finished = 0;
 
-  for(int id=0; id<10; id++)
+  for(int id=0; id<number_of_threads; id++)
   {
     auto download = progress.add_download(id, "file" + std::to_string(id));
     threads.push_back(std::thread(run_download, download));

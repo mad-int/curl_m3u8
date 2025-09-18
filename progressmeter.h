@@ -43,14 +43,16 @@ public:
 
   void print();
 
+  void set_number_of_downloads(size_t n);
+
 
 private:
 
   std::mutex m_mutex;
 
   process_t m_main_process{"total"};
-  size_t m_finished_processes = 0;
-  size_t m_all_processes = 0;
+  size_t m_finished = 0;
+  size_t m_all = 0;
 
   std::list<download_process_t> m_processes = {}; // currently running processes
 
@@ -106,4 +108,5 @@ auto calc_progressbar_undefined(size_t secs, std::string const& cursor, size_t b
 
 auto shorten_bytes(size_t const& bytes) -> std::tuple<double, std::string>;
 auto shorten_string(std::string const& str, size_t const& maxlen) -> std::string;
+auto calc_numberlength(size_t number) -> size_t;
 

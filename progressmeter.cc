@@ -24,7 +24,7 @@ using namespace std::chrono_literals;
 
 auto format_line(process_t const& process,
     int const length) -> std::string;
-auto format_totalline(process_t const& main_process, size_t const running_processes, size_t const total_processes,
+auto format_totalline(process_t const& main_process, size_t const finished, size_t const total,
     int const length) -> std::string;
 
 auto format_line(std::string name, size_t transfered_bytes, std::optional<size_t> avg_speed,
@@ -85,7 +85,11 @@ auto progressmeter_t::add_download(int id, std::string const& name) -> download_
       and "a process with this id exists already");
 
   m_processes.emplace_back(id, name);
-  m_all_processes++;
+  if(m_finished + m_processes.size() > m_all)
+  {
+    assert(m_finished + m_processes.size() == m_all + 1);
+    m_all++;
+  }
 
   return &m_processes.back();
 }
@@ -98,6 +102,7 @@ void progressmeter_t::remove_download(int id)
   [[maybe_unused]] auto it = std::find_if(m_processes.begin(), m_processes.end(), has_id);
   assert(it != m_processes.end() and "a process with this id doesn't exist");
 
+  m_finished++;
   m_processes.erase(it);
 }
 
@@ -110,6 +115,14 @@ void progressmeter_t::finish_download(int id)
   assert(it != m_processes.end() and "a process with this id doesn't exist");
 
   it->finish();
+}
+
+void progressmeter_t::set_number_of_downloads(size_t n)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  if(n > m_all)
+    m_all = n;
 }
 
 void progressmeter_t::print()
@@ -193,6 +206,7 @@ void progressmeter_t::print()
       auto const& [id, process] = *finished;
       std::cout << format_line(process, w.ws_col) << std::endl;
 
+      m_finished++;
       m_processes.erase(std::find_if(m_processes.begin(), m_processes.end(),
             [id](download_process_t const& p) { return p.get_id() == id; }));
     }
@@ -211,7 +225,7 @@ void progressmeter_t::print()
 
     // print total-line
     {
-      std::cout << format_totalline(main_process, running_processes, m_all_processes, w.ws_col) << std::endl;
+      std::cout << format_totalline(main_process, m_finished, m_all, w.ws_col) << std::endl;
       last_printed_lines++;
     }
 
@@ -247,20 +261,18 @@ auto format_line(process_t const& process, int const length) -> std::string
  * Everything element is overall e.g. overall transfered bytes, except for speed.
  * Speed is actual speed, not overall speed.
  */
-auto format_totalline(process_t const& main_process, size_t const running_processes, size_t total_processes,
+auto format_totalline(process_t const& main_process, size_t const finished, size_t total,
     int const length) -> std::string
 {
-  assert(running_processes <= total_processes);
-  size_t const finished_processes = total_processes - running_processes;
-
-  // TODO: pad according to the length of the number.
-  std::string const name = std::format("total ({}/{})", finished_processes, total_processes);
+  assert(finished <= total);
+  size_t const len = calc_numberlength(total);
+  std::string const name = std::format("total ({0:{2}}/{1:{2}})", finished, total, len);
 
   using namespace std::chrono;
   milliseconds const duration = duration_cast<milliseconds>(system_clock::now() - main_process.start);
 
-  double const percent = running_processes > 0
-    ? static_cast<double>(finished_processes)/static_cast<double>(total_processes)
+  double const percent = finished < total
+    ? static_cast<double>(finished)/static_cast<double>(total)
     : 1.0;
 
   return format_line(name, main_process.transfered, main_process.avg_speed, duration, percent,
@@ -437,5 +449,17 @@ auto shorten_string(std::string const& str, size_t const& maxlen) -> std::string
   }
 
   return ret;
+}
+
+auto calc_numberlength(size_t number) -> size_t
+{
+  int len = 1;
+  while(number >= 10)
+  {
+    len++;
+    number /= 10;
+  }
+
+  return len;
 }
 

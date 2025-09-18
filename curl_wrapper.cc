@@ -260,6 +260,7 @@ auto curl_wrapper::download_files(std::vector<pathurl_t> const pathurls)
   //
 
   progressmeter_t progressmeter;
+  progressmeter.set_number_of_downloads(pathurls.size());
 
   int active_handles = 0;
   const int max_active_handles = 5;
