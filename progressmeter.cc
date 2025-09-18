@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm> // std::find_if
 #include <format>
+#include <optional>
 #include <iostream> // std::cout, std::cerr
 #include <vector>
 
@@ -11,7 +12,7 @@
 
 #include "progressmeter.h"
 
-// Slightly overengineered: the multi-threading support is unnecessary, but whatever.
+// Slightly overengineered: the multi-threading support is unnecessary for libcurl, I think, but whatever.
 
 // ---
 
@@ -21,15 +22,19 @@ static const char* CURSOR_UP = "\33[A";
 using namespace std::chrono;
 using namespace std::chrono_literals;
 
-struct download_process_intern_t;
-auto format_line(download_process_intern_t const& process, int const length) -> std::string;
+auto format_line(process_t const& process,
+    int const length) -> std::string;
+auto format_totalline(process_t const& main_process, size_t const running_processes, size_t const total_processes,
+    int const length) -> std::string;
+
+auto format_line(std::string name, size_t transfered_bytes, std::optional<size_t> avg_speed,
+    std::chrono::milliseconds const& duration, double percent, int const length) -> std::string;
 
 // ---
 
-download_process_t::download_process_t(int id, std::string const& name, time_point const& start)
-  : m_id(id), m_name(name), m_start(start)
-  , m_mutex(), m_transfered(0), m_total(0), m_finished(false)
-  , m_transfered_list({std::make_tuple(system_clock::now(), 0)})
+download_process_t::download_process_t(int id, std::string const& name)
+  : m_mutex{}, m_id{id}, m_process{name, std::chrono::system_clock::now()}
+  , m_transfered_list({std::make_tuple(m_process.start, 0)})
 {
 }
 
@@ -37,8 +42,8 @@ void download_process_t::update(size_t total, size_t transfered)
 {
   std::lock_guard<std::mutex> guard{m_mutex};
 
-  m_transfered = transfered;
-  m_total = total;
+  m_process.transfered = transfered;
+  m_process.total = total;
 
   auto const now = system_clock::now();
 
@@ -50,31 +55,23 @@ void download_process_t::update(size_t total, size_t transfered)
   }
 }
 
-// ---
-
-struct download_process_intern_t
+auto download_process_t::copy() -> std::tuple<int, process_t>
 {
-  using time_point = download_process_t::time_point;
-
   int id;
-  std::string name;
-  time_point start;
+  process_t process;
+  decltype(m_transfered_list) transfered_list = {};
 
-  size_t transfered;
-  size_t total;
-  bool finished;
+  { // critical copy-section
+    std::lock_guard<std::mutex> guard(m_mutex);
 
-  std::list<std::tuple<time_point, size_t>> transfered_list = {};
+    id = m_id;
+    process = m_process;
+    transfered_list = m_transfered_list;
+  }
 
-  static auto copy(download_process_t& process) -> download_process_intern_t;
-};
+  process.avg_speed = calc_avg_speed(transfered_list);
 
-auto download_process_intern_t::copy(download_process_t& process) -> download_process_intern_t
-{
-  std::lock_guard<std::mutex> guard(process.m_mutex);
-
-  return download_process_intern_t{ process.m_id, process.m_name, process.m_start,
-    process.m_transfered, process.m_total, process.m_finished, process.m_transfered_list};
+  return std::make_tuple(id, process);
 }
 
 // ---
@@ -88,6 +85,8 @@ auto progressmeter_t::add_download(int id, std::string const& name) -> download_
       and "a process with this id exists already");
 
   m_processes.emplace_back(id, name);
+  m_all_processes++;
+
   return &m_processes.back();
 }
 
@@ -123,20 +122,53 @@ void progressmeter_t::print()
 
   int last_printed_lines = 0;
 
-  // copy process-list
-  std::list<download_process_intern_t> processes;
+  // Copy main-process (m_main_process) and running-processes-list (m_processes).
+  process_t main_process;
+  std::list<std::tuple<int, process_t>> processes;
   {
     last_printed_lines = m_last_printed_lines;
     bool processes_finished = false;
 
+    // copy m_main_process
+    main_process = m_main_process;
+    size_t avg_speed = 0;
+    bool with_unknown_totals = false;
+
     // copy m_processes
     for(auto& process : m_processes)
     {
-      processes.push_back( download_process_intern_t::copy(process) );
-      if(processes.back().finished)
+      processes.push_back(process.copy());
+      auto const& [_, p] = processes.back();
+
+      if(p.is_finished)
+      {
         processes_finished = true;
+
+        m_main_process.transfered += p.transfered;
+        m_main_process.total += p.total;
+      }
+
+      // Note: m_main_process only contains the overall finished stats, see above.
+      // The running stats need to be added extra.
+      main_process.transfered += p.transfered;
+      main_process.total += p.total;
+
+      if(p.avg_speed.has_value())
+        avg_speed += p.avg_speed.value();
+
+      if(p.total == 0)
+        with_unknown_totals = true;
     }
 
+    if(avg_speed != 0)
+      main_process.avg_speed = avg_speed;
+
+    // If one is unknown the overall total is unknown.
+    if(with_unknown_totals)
+      main_process.total = 0;
+
+    // If processes finished we print the progressmeter
+    // otherwise only if 1s past already.
     if(not processes_finished and now - m_last < 1s)
       return;
     m_last = now;
@@ -144,7 +176,7 @@ void progressmeter_t::print()
 
   {
     auto running = std::partition(processes.begin(), processes.end(),
-        [](download_process_intern_t const& p) { return p.finished; });
+        [](auto const& p) { return std::get<1>(p).is_finished; });
 
     // Get terminal-window size.
     struct winsize w; // ws_row, ws_col
@@ -158,17 +190,28 @@ void progressmeter_t::print()
     // print finished processes
     for(auto finished = processes.begin(); finished != running; finished++)
     {
-      std::cout << format_line(*finished, w.ws_col) << std::endl;
+      auto const& [id, process] = *finished;
+      std::cout << format_line(process, w.ws_col) << std::endl;
 
-      auto id = finished->id;
       m_processes.erase(std::find_if(m_processes.begin(), m_processes.end(),
             [id](download_process_t const& p) { return p.get_id() == id; }));
     }
 
     // print unfinished processes
+    size_t running_processes = 0;
     for(; running != processes.end(); running++)
     {
-      std::cout << format_line(*running, w.ws_col) << std::endl;
+      auto const& [_, process] = *running;
+
+      std::cout << format_line(process, w.ws_col) << std::endl;
+      running_processes++;
+
+      last_printed_lines++;
+    }
+
+    // print total-line
+    {
+      std::cout << format_totalline(main_process, running_processes, m_all_processes, w.ws_col) << std::endl;
       last_printed_lines++;
     }
 
@@ -178,14 +221,64 @@ void progressmeter_t::print()
 
 auto format_line(download_process_t& process, int const length) -> std::string
 {
-  return format_line(download_process_intern_t::copy(process), length);
+  return format_line(std::get<1>(process.copy()), length);
 }
 
-auto format_line(download_process_intern_t const& process, int const length) -> std::string
+auto format_line(process_t const& process, int const length) -> std::string
+{
+  assert(process.total >= 0);
+
+  using namespace std::chrono;
+  milliseconds const duration = duration_cast<milliseconds>(system_clock::now() - process.start);
+
+  double percent = -1.0;
+  if(process.is_finished)
+    percent = 1.0;
+  else if(process.total > 0)
+    percent = static_cast<double>(process.transfered)/static_cast<double>(process.total);
+
+  return format_line(process.name, process.transfered, process.avg_speed, duration, percent, length);
+}
+
+/**
+ * name         downloaded  speed  time      progress percent
+ * total ( x/n      100 MB 5 MB/s 14:13 [########   ] 67%
+ *
+ * Everything element is overall e.g. overall transfered bytes, except for speed.
+ * Speed is actual speed, not overall speed.
+ */
+auto format_totalline(process_t const& main_process, size_t const running_processes, size_t total_processes,
+    int const length) -> std::string
+{
+  assert(running_processes <= total_processes);
+  size_t const finished_processes = total_processes - running_processes;
+
+  // TODO: pad according to the length of the number.
+  std::string const name = std::format("total ({}/{})", finished_processes, total_processes);
+
+  using namespace std::chrono;
+  milliseconds const duration = duration_cast<milliseconds>(system_clock::now() - main_process.start);
+
+  double const percent = running_processes > 0
+    ? static_cast<double>(finished_processes)/static_cast<double>(total_processes)
+    : 1.0;
+
+  return format_line(name, main_process.transfered, main_process.avg_speed, duration, percent,
+      length);
+}
+
+/**
+ * name      downloaded     speed  time            progress percent
+ * name       122,2 KiB 463 KiB/s 00:00 [#############    ] 100%
+ */
+auto format_line(std::string name, size_t transfered_bytes, std::optional<size_t> avg_speed,
+    std::chrono::milliseconds const& duration, double percent, int const length) -> std::string
 {
   using namespace std::chrono;
 
-  //  name      downloaded     speed    time   progress        percent
+  assert(((0.0 <= percent) and (percent <= 1.0)) or (percent == -1.0));
+
+  //  name      downloaded     speed    time   progress           percent
   //  variable                                 variable
   // [        ]  [       ]  [       ]  [   ]  [                 ] [  ]
   // name        122,2 KiB  463 KiB/s  00:00  [#############    ] 100%  <- pacman
@@ -194,15 +287,13 @@ auto format_line(download_process_intern_t const& process, int const length) -> 
   // name  percent downloaded    speed  estimated time until finished
   // name     100%      400MB  1.5MB/s       14:13 ETA                  <- scp
 
-  // std::format("{:<20} {:.1f} {}", process.m_name, transfered_quantity, transfered_unit);
+  // std::format("{:<20} {:5.1f} {}", process.m_name, transfered_quantity, transfered_unit);
   // {:<20} name: left-aligned 20 characters long (padded with space by default)
   // {:0>2} time: right-aligned 2 characters long (padded with 0)
   // {:5.1f} transfered in total(!) 5 character long from this 1 character after the decimal point
   // {:3} percent: left-aligned 3-characters long
 
-  auto const now = system_clock::now();
-
-  auto const [transfered_quantity, transfered_unit] = shorten_bytes(process.transfered);
+  auto const [transfered_quantity, transfered_unit] = shorten_bytes(transfered_bytes);
 
   // already transfered
   // e.g. 122,2 KiB
@@ -210,27 +301,21 @@ auto format_line(download_process_intern_t const& process, int const length) -> 
 
   // time it took until now
   // e.g. 01:50
-  auto const duration = now - process.start;
   auto const minutes = duration_cast<std::chrono::minutes>(duration);
   auto const seconds = duration_cast<std::chrono::seconds>(duration - minutes);
   std::string const time_str = std::format("{:0>2}:{:0>2}", minutes.count(), seconds.count());
 
   // transfer-speed
   // e.g. 463,0 KiB/s
-  auto const [speed, speed_unit] = calc_avg_speed(process.transfered_list);
-  std::string const speed_str = speed == -1.0
-    ? std::format(  "  -.- {:>5}", speed_unit)
-    : std::format("{:5.1f} {:>5}", speed, speed_unit);
+  auto const [speed, speed_unit] = shorten_bytes(avg_speed.has_value() ? avg_speed.value() : 0.0);
+  std::string const speed_str = avg_speed.has_value()
+    ? std::format("{:5.1f} {:>5}", speed, speed_unit + "/s")
+    : std::format(  "  -.- {:>5}", speed_unit + "/s");
 
   // percentage completed
-  std::string percent_str = process.finished ? "100%" : "---%";
-  if(process.total > 0)
-  {
-    assert(process.transfered <= process.total);
-    double const percent = static_cast<double>(process.transfered)/static_cast<double>(process.total);
-    percent_str = std::format("{:3.0f}%", percent*100.0);
-  }
-  // else
+  std::string percent_str = (percent != -1.0) ? std::format("{:3.0f}%", percent*100.0) : std::string{"---%"};
+  if(percent >= 1.0)
+    percent_str = "100%";
 
   // length without name and progess-bar (with padding whitespace in-between
   size_t length1 = 1 + transfered_str.length() + 2 + speed_str.length() + 1 + time_str.length() + 1 + percent_str.length();
@@ -241,36 +326,22 @@ auto format_line(download_process_intern_t const& process, int const length) -> 
   size_t length2 = static_cast<size_t>(length) - length1; // space left for the name and the progress-bar
 
   // name
-  std::string name = std::format("{: <{}}", shorten_string(process.name, length2/2 - 1), length2/2 - 1); // 1 is padding
+  std::string name_str = std::format("{: <{}}", shorten_string(name, length2/2 - 1), length2/2 - 1); // 1 is padding
 
   // progressbar
-  std::string progressbar_str = "";
-  int barlength = length2/2 - 3; // 3 is for the 1-character padding and "[]".
-  if(process.total > 0)
-  {
-    progressbar_str = std::string{"["} + calc_progressbar_filled(process.transfered, process.total, barlength) + std::string{"]"};
-  }
-  else if(process.finished and process.total == 0)
-  {
-    progressbar_str = std::string{"["} + calc_progressbar_filled(process.transfered, process.transfered, barlength) + std::string{"]"};
-  }
-  else
-  {
-    size_t secs = std::chrono::duration_cast<std::chrono::seconds>(now - process.start).count();
-    progressbar_str = std::string{"["} + calc_progressbar_undefined(secs, "<->", barlength) + std::string{"]"};
-  }
+  int const barlength = length2/2 - 3; // 3 is for the one character padding, "[" and "]".
 
-  return std::format(" {} {}  {} {} {} {}", name, transfered_str, speed_str, time_str, progressbar_str, percent_str);
+  std::string const progressbar_str = percent != -1.0
+    ? std::string{"["} + calc_progressbar_filled(percent, barlength) + std::string{"]"}
+    : std::string{"["} + calc_progressbar_undefined(seconds.count(), "<->", barlength) + std::string{"]"};
+
+  return std::format(" {} {}  {} {} {} {}", name_str, transfered_str, speed_str, time_str, progressbar_str, percent_str);
 }
 
-auto calc_avg_speed(std::list<std::tuple<system_clock::time_point, size_t>> transfered_list) -> std::tuple<double, std::string>
+auto calc_avg_speed(std::list<std::tuple<system_clock::time_point, size_t>> transfered_list) -> std::optional<size_t>
 {
-  bool const avg_speed_exists = (transfered_list.size() >= 2);
-
   // TODO: make it work also with a size() of 1 => assume duration is 1s from the start.
-
-  size_t avg_speed = 0;
-  if(avg_speed_exists)
+  if(transfered_list.size() >= 2)
   {
     auto const [last_time, last_transfered] = *(transfered_list.rbegin());
     auto const [before_last_time, before_last_transfered] = *(++transfered_list.rbegin());
@@ -281,18 +352,18 @@ auto calc_avg_speed(std::list<std::tuple<system_clock::time_point, size_t>> tran
     double const duration_last = std::chrono::duration<double>(last_time - before_last_time).count();
     size_t const transfered_diff = last_transfered - before_last_transfered;
 
-    avg_speed = static_cast<size_t>(static_cast<double>(transfered_diff) / duration_last);
+    size_t avg_speed = static_cast<size_t>(static_cast<double>(transfered_diff) / duration_last);
+    return avg_speed;
   }
 
-  auto const [quantity, unit] = shorten_bytes(avg_speed_exists ? avg_speed : 0);
-  return std::make_tuple(avg_speed_exists ? quantity : -1.0, unit+"/s");
+  return {};
 }
 
-auto calc_progressbar_filled(size_t const transfered, size_t const total, size_t const barlength) -> std::string
+auto calc_progressbar_filled(double const percent, size_t const barlength) -> std::string
 {
-  assert(transfered <= total);
+  assert((0.0 <= percent) and (percent <= 1.0));
 
-  double const percent = static_cast<double>(transfered)/static_cast<double>(total);
+  //double const percent = static_cast<double>(transfered)/static_cast<double>(total);
   size_t const filled = static_cast<size_t>(barlength * percent);
 
   std::string progressbar = std::format("{: <{}}", std::string(filled, '#'), barlength);

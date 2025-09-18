@@ -49,7 +49,6 @@ static char getch(bool echo = true);
 
 // TODO: on verbose implement more logging
 // TODO: Instead of the local directory, use a subdir in temp.
-// TODO: progressmeter add a total line to output
 // TODO: cmake install target (maybe also Debug and Release target)
 // TODO: support cancel
 // TODO: support continue after halfway canceled download
@@ -386,11 +385,11 @@ void print_usage(const char* progname)
   std::cout <<
     "Usage: %s [-v|--verbose] <-n|--name NAME> <URL>\n"
     "Options:\n"
-    "--help, -h      \t\tShow help.\n"
-    "--vebose,-v     \t\tEnable verbose output.\n"
-    "--name,-n <NAME>\t\t<NAME>.mp4 is the resulting filename.\n"
-    "<URL>           \t\tUrl pointing to a m3u8-file.\n\n"
-    "Download all the parts in a m3u8-file and concat them together via ffmpeg.\n"
+    "-h, --help       \t\tShow help.\n"
+    "-v, --vebose     \t\tEnable verbose output.\n"
+    "-n, --name=<NAME>\t\t<NAME>.mp4 is the resulting filename.\n"
+    "<URL>            \t\tUrl pointing to a m3u8-file.\n\n"
+    "Download all the parts in a m3u8-file via libcurl and concat them together via ffmpeg.\n"
     << std::endl;
 }
 

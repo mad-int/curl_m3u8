@@ -24,9 +24,9 @@ TEST(progressmeter_tests, shorten_bytes)
 
 TEST(progressmeter_tests, calc_progressbar_filled)
 {
-  std::string progressbar0   = calc_progressbar_filled(  0, 100, 40);
-  std::string progressbar50  = calc_progressbar_filled( 50, 100, 40);
-  std::string progressbar100 = calc_progressbar_filled(100, 100, 40);
+  std::string progressbar0   = calc_progressbar_filled(0.0, 40);
+  std::string progressbar50  = calc_progressbar_filled(0.5, 40);
+  std::string progressbar100 = calc_progressbar_filled(1.0, 40);
 
   EXPECT_EQ(progressbar0,   std::string{"                                        "});
   EXPECT_EQ(progressbar50,  std::string{"####################                    "});
