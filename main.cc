@@ -38,7 +38,7 @@ auto download_m3u8(curl_wrapper const& curl, std::string const& url) -> m3u8_t; 
 auto pick_playlist(m3u8_t const& m3u8) -> int;
 int concat_ffmpeg(std::string const& name, std::vector<std::filesystem::path> const& parts);
 
-auto read_urls_from_m3u8(const std::string filename) -> std::vector<std::string>;
+void print_lines(std::string const& str, int maxlines);
 
 auto parse_options(int argc, char* argv[]) -> std::optional<cmdline_t>;
 void print_usage(const char* progname);
@@ -195,9 +195,16 @@ auto download_m3u8(curl_wrapper const& curl, std::string const& url) -> m3u8_t
   assert(std::holds_alternative<std::vector<char>>(result));
   auto buffer = std::get<std::vector<char>>(result);
 
-  //std::ranges::copy(buffer, std::ostream_iterator<char>(std::cout, ""));
   if(not is_m3u8(buffer))
+  {
+    std::string const page{buffer.data(), buffer.size()};
+    bool is_html = page.find("<html") != std::string::npos;
+    if(is_html)
+      print_lines(page, 10);
+
+    //std::ranges::copy(buffer, std::ostream_iterator<char>(std::cout, ""));
     throw m3u8_errc::wrong_file_format;
+  }
 
   m3u8_t m3u8{buffer};
   if(m3u8.contains_relative_urls())
@@ -207,6 +214,19 @@ auto download_m3u8(curl_wrapper const& curl, std::string const& url) -> m3u8_t
   }
 
   return m3u8;
+}
+
+void print_lines(std::string const& str, int maxlines)
+{
+  std::stringstream ss{str};
+
+  std::string line = "";
+  std::getline(ss, line);
+  for(int i=0; ss.good() and i < maxlines; i++)
+  {
+    std::cout << line << std::endl;
+    std::getline(ss, line);
+  }
 }
 
 auto pick_playlist(m3u8_t const& m3u8) -> int
@@ -303,78 +323,6 @@ int concat_ffmpeg(std::string const& name, std::vector<std::filesystem::path> co
   std::remove(listfilename.c_str());
   for(auto part : parts)
     std::remove(part.c_str());
-
-  return ret;
-}
-
-
-// ---
-
-std::vector<std::string> read_urls_from_m3u8(const std::string filename)
-{
-  std::vector<std::string> ret;
-
-  FILE* m3u8 = fopen(filename.c_str(), "r");
-  if(m3u8 == nullptr)
-  {
-    const int err = errno;
-    fprintf(stderr, "Error: Can't open file `%s' for reading: %s\n", filename.c_str(), std::strerror(err));
-    return std::vector<std::string> {};
-  }
-  // else
-
-  size_t buffer_length = 256;
-  char* buffer = static_cast<char*>( malloc(sizeof(char)*buffer_length) );
-
-  ssize_t read_bytes = getline(&buffer, &buffer_length, m3u8);
-  if(read_bytes == -1 and not feof(m3u8))
-  {
-    const int err = errno;
-    fprintf(stderr, "Error: Reading from file `%s' failed: %s\n", filename.c_str(), std::strerror(err));
-    free(buffer);
-    fclose(m3u8);
-    return std::vector<std::string> {};
-  }
-  else if(feof(m3u8))
-  {
-    fprintf(stderr, "Error: File `%s' is empty!\n", filename.c_str());
-    free(buffer);
-    fclose(m3u8);
-    return std::vector<std::string> {};
-  }
-  else if(trim(std::string {buffer}) != "#EXTM3U")
-  {
-    fprintf(stderr, "Error: File format of `%s' is not m3u8!\n", filename.c_str());
-    free(buffer);
-    fclose(m3u8);
-    return std::vector<std::string> {};
-  }
-  // else
-
-  while((read_bytes = getline(&buffer, &buffer_length, m3u8)) != -1)
-  {
-    const std::string line = trim(std::string {buffer});
-
-    if(line == "#EXT-X-ENDLIST")
-      break;
-
-    if(line == "" or line[0] == '#')
-      continue;
-
-    ret.push_back(line);
-  }
-
-  if(read_bytes == -1 and not feof(m3u8))
-  {
-    const int err = errno;
-    fprintf(stderr, "Error: Reading from file `%s' failed: %s\n", filename.c_str(), std::strerror(err));
-    free(buffer);
-    fclose(m3u8);
-    return std::vector<std::string> {};
-  }
-
-  free(buffer);
-  fclose(m3u8);
 
   return ret;
 }
