@@ -20,6 +20,8 @@
 #include "m3u8.h"
 #include "string_util.h"
 
+const char* const VERSION = "0.4";
+
 // ---
 
 struct cmdline_t
@@ -381,14 +383,15 @@ std::vector<std::string> read_urls_from_m3u8(const std::string filename)
 
 void print_usage(const char* progname)
 {
-  std::cout <<
-    "Usage: %s [-v|--verbose] <-n|--name NAME> <URL>\n"
-    "Options:\n"
-    "-h, --help       \t\tShow help.\n"
-    "-v, --vebose     \t\tEnable verbose output.\n"
-    "-n, --name <NAME>\t\t<NAME>.mp4 is the resulting filename.\n"
-    "<URL>            \t\tUrl pointing to a m3u8-file.\n\n"
-    "Download all the parts in a m3u8-file via libcurl and concat them together via ffmpeg.\n"
+  std::cout << std::format(
+      "Usage: {} [-v|--verbose] (-n|--name) <NAME> <URL>\n"
+      "Options:\n"
+      "-h, --help       \t\tShow help.\n"
+      "-v, --verbose    \t\tEnable verbose output.\n"
+      "-n, --name <NAME>\t\t<NAME>.mp4 is the resulting filename.\n"
+      "<URL>            \t\tUrl pointing to a m3u8-file.\n"
+      "Download all the parts in a m3u8-file via libcurl and concat them together via ffmpeg.\n"
+      "curl_m3u8 {} - licence GPLv3+ (GNU GPL Version 3 or later).", progname, VERSION)
     << std::endl;
 }
 
