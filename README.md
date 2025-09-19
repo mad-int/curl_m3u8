@@ -38,10 +38,19 @@ To copy the URL in Firefox go to the Network tab of the Web Developer Tools.
 The Web Developer Tools can be found under Tools -> Browser Tools -> Web Developer Tools
 or by pressing F12 usually. For Chrome it is similar.
 
+## Installation
+
+```sh
+cmake -DCMAKE_BUILD_TYPE=Release .
+make
+make test
+sudo cmake --install . --prefix /usr
+```
+
 ## Development
 
 ```sh
-cmake .
+cmake -DCMAKE_BUILD_TYPE=Debug .
 make
 make test
 ```

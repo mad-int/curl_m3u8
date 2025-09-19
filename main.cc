@@ -49,7 +49,6 @@ static char getch(bool echo = true);
 
 // TODO: on verbose implement more logging
 // TODO: Instead of the local directory, use a subdir in temp.
-// TODO: cmake install target (maybe also Debug and Release target)
 // TODO: support cancel
 // TODO: support continue after halfway canceled download
 

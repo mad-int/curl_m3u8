@@ -4,7 +4,7 @@ project(curl_m3u8)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-set(CMAKE_BUILD_TYPE Debug) # Change to Release if you want a release-build.
+#set(CMAKE_BUILD_TYPE Debug) # Change to Release if you want a release-build.
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compile_options(-Wall)
@@ -20,6 +20,7 @@ find_package(CURL REQUIRED)
 
 add_executable(curl_m3u8 main.cc curl_wrapper.cc progressmeter.cc m3u8.cc)
 target_link_libraries(curl_m3u8 CURL::libcurl)
+install(TARGETS curl_m3u8)
 
 add_executable(progressmeter_check progressmeter_check.cc progressmeter.cc)
 
