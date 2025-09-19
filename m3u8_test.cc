@@ -81,7 +81,7 @@ TEST(m3u8_tests, is_m3u8_ok)
 
   // ---
 
-  auto result = is_m3u8("weapons/master.m3u8");
+  auto result = is_m3u8("testdata/master.m3u8");
 
   ASSERT_TRUE(std::holds_alternative<bool>(result));
   EXPECT_TRUE(std::get<bool>(result));
@@ -89,7 +89,7 @@ TEST(m3u8_tests, is_m3u8_ok)
 
 TEST(m3u8_tests, is_m3u8_fail)
 {
-  auto result = is_m3u8("doesnt_exist.m3u8");
+  auto result = is_m3u8("testdata/doesnt_exist.m3u8");
 
   EXPECT_TRUE(std::holds_alternative<fs::filesystem_error>(result));
 
