@@ -59,7 +59,7 @@ class curl_wrapper
   public:
 
     curl_wrapper()
-      : curl_wrapper("curl_wrapper/0.1")
+      : curl_wrapper("curl_wrapper/0.4")
     {}
     explicit curl_wrapper(std::string const& useragent)
       : m_useragent(useragent)

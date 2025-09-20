@@ -86,7 +86,7 @@ int main(int argc, char** argv)
 
   try
   {
-    curl_wrapper curl;
+    curl_wrapper curl{"curl_m3u8/0.4"};
 
     if(cmdline.verbose_flag)
       curl.set_verbose();
