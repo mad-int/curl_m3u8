@@ -12,8 +12,8 @@ class curl_wrapper_error
 {
   public:
 
-    explicit curl_wrapper_error(std::string const& msg, std::string const& filename = "")
-      : m_msg(msg), m_filename(filename)
+    explicit curl_wrapper_error(std::string const& msg, std::string const& url = "", std::string const& filename = "")
+      : m_msg(msg), m_url(url), m_filename(filename)
     {}
     virtual ~curl_wrapper_error() = default;
 
@@ -25,6 +25,11 @@ class curl_wrapper_error
       return m_msg.c_str();
     }
 
+    virtual std::string url() const noexcept
+    {
+      return m_url;
+    }
+
     virtual std::string filename() const noexcept
     {
       return m_filename;
@@ -33,6 +38,7 @@ class curl_wrapper_error
   private:
 
     std::string const m_msg;
+    std::string const m_url;
     std::string const m_filename;
 };
 
@@ -59,7 +65,7 @@ class curl_wrapper
   public:
 
     curl_wrapper()
-      : curl_wrapper("curl_wrapper/0.4")
+      : curl_wrapper("curl_wrapper/0.6")
     {}
     explicit curl_wrapper(std::string const& useragent)
       : m_useragent(useragent)
@@ -85,6 +91,7 @@ class curl_wrapper
       -> std::variant<std::vector<byte_t>, curl_wrapper_error>;
 
     //! Downloads a bunch of urls to paths.
+    //! The order of files in the results can differ from pathurls, beside that errors can occurre.
     auto download_files(std::vector<pathurl_t> const pathurls) -> results_t;
 
     static auto get_filename_from_url(std::string const& url) -> std::string;

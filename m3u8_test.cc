@@ -49,7 +49,7 @@ TEST(m3u8_tests, get_urls)
   EXPECT_EQ(urls[2].properties["RESOLUTION"], "1920x1080");
 }
 
-TEST(m3u8_tests, set_baseurl)
+TEST(m3u8_tests, set_urlprefix)
 {
   std::vector<urlprops_t> const urls = {
     urlprops_t{"https://server/path1", {}},
@@ -59,7 +59,7 @@ TEST(m3u8_tests, set_baseurl)
 
   m3u8_t master{urls};
 
-  master.set_baseurl("https://server/");
+  master.set_urlprefix("https://server/");
 
   ASSERT_EQ(master.get_urls().size(), 3);
   EXPECT_EQ(master.get_url(0).url, std::string{"https://server/path1"});
@@ -67,13 +67,19 @@ TEST(m3u8_tests, set_baseurl)
   EXPECT_EQ(master.get_url(2).url, std::string{"https://server/path3/"});
 }
 
-TEST(m3u8_tests, get_baseurl)
+TEST(m3u8_tests, get_urlbase)
 {
-  EXPECT_EQ(get_baseurl("https://server/path"), std::string{"https://server"});
-  EXPECT_EQ(get_baseurl("http://server/dir1/dir2/dir3/"), std::string{"http://server"});
-  EXPECT_EQ(get_baseurl("ftp://server/./dir2/dir3/"), std::string{"ftp://server"});
+  EXPECT_EQ(get_urlbase("https://server/path"), std::string{"https://server"});
+  EXPECT_EQ(get_urlbase("http://server/dir1/dir2/dir3/"), std::string{"http://server"});
+  EXPECT_EQ(get_urlbase("ftp://server/./dir2/dir3/"), std::string{"ftp://server"});
 }
 
+TEST(m3u8_tests, get_urlpath)
+{
+  EXPECT_EQ(get_urlpath("https://server/path"), std::string{"https://server"});
+  EXPECT_EQ(get_urlpath("http://server/dir1/dir2/dir3/"), std::string{"http://server/dir1/dir2/dir3"});
+  EXPECT_EQ(get_urlpath("ftp://server/./dir2/dir3/"), std::string{"ftp://server/./dir2/dir3"});
+}
 
 TEST(m3u8_tests, is_m3u8_ok)
 {

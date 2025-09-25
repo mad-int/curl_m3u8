@@ -11,6 +11,7 @@
 #include <unistd.h> // STDOUT_FILENO
 
 #include "progressmeter.h"
+#include "string_util.h"
 
 // Slightly overengineered: the multi-threading support is unnecessary for libcurl, I think, but whatever.
 
@@ -439,18 +440,6 @@ auto shorten_string(std::string const& str, size_t const& maxlen) -> std::string
   }
 
   return ret;
-}
-
-auto calc_numberlength(size_t number) -> size_t
-{
-  int len = 1;
-  while(number >= 10)
-  {
-    len++;
-    number /= 10;
-  }
-
-  return len;
 }
 
 void transfered_list_push_back(process_t& process, size_t transfered)

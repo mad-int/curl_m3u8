@@ -7,6 +7,7 @@
 #include <optional>
 #include <regex>
 #include <string>
+#include <system_error> // std::error_code
 #include <vector>
 
 #include <iostream> // for debugging
@@ -41,7 +42,7 @@ namespace
       int index, download_process_t* process) -> std::variant<curl_handle_t, curl_wrapper_error>;
   auto curl_multi_handle_message(CURLM* multi_handle, CURLMsg* m) -> std::tuple<CURLcode, size_t>;
 
-  auto verify_file(std::filesystem::path const& path) -> std::optional<curl_wrapper_error>;
+  auto verify_file(std::filesystem::path const& path, std::string const& url) -> std::optional<curl_wrapper_error>;
 
   void curl_easy_setup(CURL* handle, curl_context_t const& context, curl_write_callback callback, void* userdata);
 
@@ -65,14 +66,18 @@ namespace
     curl_handle_t(curl_handle_t&&);
     curl_handle_t& operator=(curl_handle_t&&);
 
-    bool init();
-    bool init(std::filesystem::path const& path);
+    bool init(std::string const& url);
+    bool init(std::string const& url, std::filesystem::path const& path);
+
+    void close();
 
     inline auto get() const -> CURL* { return m_handle; }
     inline auto errormsg() const -> std::string { return std::string{m_errbuf}; }
 
     CURL* m_handle = nullptr;
     char* m_errbuf = nullptr;
+
+    std::string m_url = "";
 
     std::filesystem::path m_path = "";
     FILE* m_fh = nullptr;
@@ -92,6 +97,9 @@ namespace
     assert(callback != nullptr);
     assert(userdata != nullptr);
 
+    if(context.verbose_flag)
+      std::cout << std::format("Try to download: {}", context.url) << std::endl;
+
     curl_easy_setopt(handle, CURLOPT_URL,         context.url.c_str());
     curl_easy_setopt(handle, CURLOPT_USERAGENT,   context.useragent.c_str());
     curl_easy_setopt(handle, CURLOPT_VERBOSE,     context.verbose_flag ? 1 : 0);
@@ -106,10 +114,11 @@ namespace
   }
 
   curl_handle_t::curl_handle_t(curl_handle_t&& other)
-    : m_handle(other.m_handle), m_errbuf(other.m_errbuf), m_path(other.m_path), m_fh(other.m_fh)
+    : m_handle(other.m_handle), m_errbuf(other.m_errbuf), m_url(other.m_url), m_path(other.m_path), m_fh(other.m_fh)
   {
     other.m_handle = nullptr;
     other.m_errbuf = nullptr;
+    other.m_url = "";
     other.m_path = "";
     other.m_fh = nullptr;
   }
@@ -126,18 +135,30 @@ namespace
       fclose(m_fh);
   }
 
+  void curl_handle_t::close()
+  {
+    if(m_fh != nullptr)
+    {
+      fclose(m_fh);
+      m_fh = nullptr;
+    }
+  }
+
   auto curl_handle_t::operator=(curl_handle_t&& other) -> curl_handle_t&
   {
     std::swap(m_handle, other.m_handle);
     std::swap(m_errbuf, other.m_errbuf);
+    std::swap(m_url, other.m_url);
     std::swap(m_path, other.m_path);
     std::swap(m_fh, other.m_fh);
 
     return *this;
   }
 
-  bool curl_handle_t::init()
+  bool curl_handle_t::init(std::string const& url)
   {
+    m_url = url;
+
     m_errbuf = new char [CURL_ERROR_SIZE];
     if(m_errbuf == nullptr)
       return false;
@@ -156,9 +177,9 @@ namespace
     return true;
   }
 
-  bool curl_handle_t::init(std::filesystem::path const& path)
+  bool curl_handle_t::init(std::string const& url, std::filesystem::path const& path)
   {
-    bool success = init();
+    bool success = init(url);
     if(not success)
       return false;
 
@@ -187,7 +208,7 @@ auto curl_wrapper::download_file(std::filesystem::path const& path, std::string 
   assert(not url.empty());
 
   curl_handle_t handle;
-  bool success = handle.init(path);
+  bool success = handle.init(url, path);
   if(not success)
     return curl_wrapper_error(handle.errormsg());
 
@@ -196,7 +217,7 @@ auto curl_wrapper::download_file(std::filesystem::path const& path, std::string 
   curl_easy_setup(handle.get(), context, append_file, handle.m_fh);
   CURLcode const res = curl_easy_perform(handle.get());
   if(res != CURLE_OK)
-    return curl_wrapper_error{handle.errormsg()};
+    return curl_wrapper_error{handle.errormsg(), url, path};
   // else
   return path;
 }
@@ -215,7 +236,7 @@ auto curl_wrapper::download_buffer(std::string const& url) const
   std::vector<byte_t> buffer = {};
 
   curl_handle_t handle;
-  bool success = handle.init();
+  bool success = handle.init(url);
   if(not success)
     return curl_wrapper_error(handle.errormsg());
 
@@ -224,7 +245,7 @@ auto curl_wrapper::download_buffer(std::string const& url) const
   curl_easy_setup(handle.get(), context, append_buffer, &buffer);
   CURLcode const res = curl_easy_perform(handle.get());
   if(res != CURLE_OK)
-    return curl_wrapper_error{handle.errormsg()};
+    return curl_wrapper_error{handle.errormsg(), url};
   // else
   return buffer;
 }
@@ -306,35 +327,42 @@ auto curl_wrapper::download_files(std::vector<pathurl_t> const pathurls)
     }
 
     // Handle messages.
+    int consecutive_errors = 0;
     int msgs_in_queue = 0;
     while(CURLMsg* msg = curl_multi_info_read(multi_handle.get(), &msgs_in_queue))
     {
       auto [errorcode, index] = curl_multi_handle_message(multi_handle.get(), msg);
 
-      std::filesystem::path path;
-      {
-        curl_handle_t handle = std::move(handles[index]);
-        path = handle.m_path;
-      }
+      curl_handle_t handle = std::move(handles[index]);
+      std::string const url = handle.m_url;
+      std::filesystem::path const path = handle.m_path;
 
-      if(errorcode  == CURLE_OK)
-      {
-        // verify_file() is only possible after handle is destroyed
-        // (and dues its file-handles written and closed).
-        auto optional_error = verify_file(path);
-        if(optional_error.has_value())
-        {
-          results.errors.push_back(optional_error.value());
-          return results;
-        }
-        // else
+      handle.close();
 
+      // verify_file() is only possible after handle is close (and thus its file-handle written and closed).
+      auto verify_error = errorcode == CURLE_OK ? verify_file(path, url) : std::optional<curl_wrapper_error>{};
+
+      if(errorcode  == CURLE_OK and not verify_error.has_value()) // good case
+      {
+        consecutive_errors = 0;
         results.succeeded_files.push_back(path);
       }
-      else
-        results.errors.push_back( curl_wrapper_error{curl_easy_strerror(errorcode), path} );
+      else if(errorcode  == CURLE_OK and verify_error.has_value()) // error case
+      {
+        consecutive_errors++;
+        results.errors.push_back(verify_error.value());
+      }
+      else // errorcode != CURLE_OK // error case
+      {
+        consecutive_errors++;
+        results.errors.push_back( curl_wrapper_error{curl_easy_strerror(errorcode), url, path} );
+      }
 
       progressmeter.finish_download(index);
+
+      // Break up after 5 consecutive errors.
+      if(consecutive_errors >= 5)
+        return results;
     }
 
     if(m_default_progressmeter)
@@ -369,29 +397,29 @@ namespace
 {
   auto curl_multi_add_handle(CURLM* multi_handle, curl_context_t const& context, std::filesystem::path const& path,
       int index, download_process_t* process) -> std::variant<curl_handle_t, curl_wrapper_error>
-    {
-      curl_handle_t handle;
-      bool success = handle.init(path);
-      if(not success)
-        return curl_wrapper_error{handle.errormsg(), path.c_str()};
-      // else
+  {
+    curl_handle_t handle;
+    bool success = handle.init(context.url, path);
+    if(not success)
+      return curl_wrapper_error{handle.errormsg(), context.url, path.c_str()};
+    // else
 
-      curl_easy_setup(handle.get(), context, append_file, handle.m_fh);
-      curl_easy_setopt(handle.get(), CURLOPT_PRIVATE, index);
+    curl_easy_setup(handle.get(), context, append_file, handle.m_fh);
+    curl_easy_setopt(handle.get(), CURLOPT_PRIVATE, index);
 
-      // ---
-      curl_easy_setopt(handle.get(), CURLOPT_NOPROGRESS, 0);
-      curl_easy_setopt(handle.get(), CURLOPT_XFERINFODATA, process);
-      curl_easy_setopt(handle.get(), CURLOPT_XFERINFOFUNCTION, progress_callback);
+    // ---
+    curl_easy_setopt(handle.get(), CURLOPT_NOPROGRESS, 0);
+    curl_easy_setopt(handle.get(), CURLOPT_XFERINFODATA, process);
+    curl_easy_setopt(handle.get(), CURLOPT_XFERINFOFUNCTION, progress_callback);
 
-      CURLMcode res = ::curl_multi_add_handle(multi_handle, handle.get());
-      if(res != CURLM_OK)
-        return curl_wrapper_error{curl_multi_strerror(res), path.c_str()};
-      // else
-      //
+    CURLMcode res = ::curl_multi_add_handle(multi_handle, handle.get());
+    if(res != CURLM_OK)
+      return curl_wrapper_error{curl_multi_strerror(res), context.url, path.c_str()};
+    // else
+    //
 
-      return std::move(handle);
-    }
+    return std::move(handle);
+  }
 
   auto curl_multi_handle_message(CURLM* multi_handle, CURLMsg* m) -> std::tuple<CURLcode, size_t>
   {
@@ -427,13 +455,13 @@ namespace
     return std::make_tuple(CURLE_OK, -1);
   }
 
-  auto verify_file(std::filesystem::path const& path) -> std::optional<curl_wrapper_error>
+  auto verify_file(std::filesystem::path const& path, std::string const& url) -> std::optional<curl_wrapper_error>
   {
     std::error_code errc;
     auto const size = std::filesystem::file_size(path, errc);
 
     if(errc)
-      return curl_wrapper_error{errc.message(), path};
+      return curl_wrapper_error{errc.message(), url, path};
 
     if(size <= 1'024) // 1 KB - too small something went wrong
     {
@@ -447,16 +475,27 @@ namespace
       {
         int const err = errno;
         errc = std::error_code{err, std::generic_category()};
-        return curl_wrapper_error{std::format("Couldn't open file after download: {}", errc.message()), path};
+        return curl_wrapper_error{std::format("Couldn't open file after download: {}", errc.message()), url, path};
       }
 
+      // Maybe should just take the complete file-content instead of only a line.
+      // Maybe only if it is <html> or text. Or only the html-part, I saw funny mixes.
       std::string line = "";
-      std::getline(file, line);
+      while(std::getline(file, line))
+      {
+        std::smatch results;
+        if(line.find("error code: 1015") != std::string::npos)
+        {
+          return curl_wrapper_error{"rate limit exceeded", url, path};
+        }
+        //else if(line.find("<title>") != std::string::npos)
+        else if(std::regex_search(line, results, std::regex("<title>(.*)</title>")))
+        {
+          return curl_wrapper_error{results[1], url, path};
+        }
+      }
 
-      if(line.find("error code: 1015") != std::string::npos)
-        return curl_wrapper_error{"rate limit exceeded", path};
-
-      return curl_wrapper_error{line, path};
+      return curl_wrapper_error{"unknown error", url, path};
     }
 
     return {};

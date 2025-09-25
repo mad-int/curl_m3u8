@@ -18,7 +18,7 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 
 find_package(CURL REQUIRED)
 
-add_executable(curl_m3u8 main.cc curl_wrapper.cc progressmeter.cc m3u8.cc)
+add_executable(curl_m3u8 main.cc curl_wrapper.cc progressmeter.cc m3u8.cc file_util.cc)
 target_link_libraries(curl_m3u8 CURL::libcurl)
 install(TARGETS curl_m3u8)
 

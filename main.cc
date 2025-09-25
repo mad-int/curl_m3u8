@@ -3,13 +3,17 @@
 #include <cstdio>   // std::remove()
 #include <cstring>  // std::strerror()
 #include <cstdlib>  // std::system()
+#include <chrono>
 #include <format>
 #include <fstream>  // std::ofstream
 #include <iostream>
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <regex>
 #include <string>
+#include <thread>
+#include <system_error> // std::error_code
 #include <variant>
 
 #include <getopt.h>
@@ -18,9 +22,10 @@
 
 #include "curl_wrapper.h"
 #include "m3u8.h"
+#include "pngfakeheader.h"
 #include "string_util.h"
 
-const char* const VERSION = "0.4";
+const char* const VERSION = "0.6";
 
 // ---
 
@@ -47,10 +52,19 @@ void print_usage(const char* progname);
 //! The ASCII-code is returned (e.g. 'c' for the c-key).
 static char getch(bool echo = true);
 
+inline auto error_ratio(curl_wrapper::results_t const& results) -> double
+{
+  assert(results.succeeded_files.size() > 0);
+  return static_cast<double>(results.errors.size())/static_cast<double>(results.succeeded_files.size());
+}
+
 // ---
 
 // TODO: on verbose implement more logging
 // TODO: Instead of the local directory, use a subdir in temp.
+// TODO: In curl_wrapper_error rename filename to path. Use path everywhere instead of filename.
+// TODO: Call set_error instead of set_finish in progressmeter and adapt output.
+// TODO: update the progressmeter all 500ms instead of 1s (seems slow and stuttery right now)
 // TODO: support cancel
 // TODO: support continue after halfway canceled download
 
@@ -86,7 +100,7 @@ int main(int argc, char** argv)
 
   try
   {
-    curl_wrapper curl{"curl_m3u8/0.4"};
+    curl_wrapper curl{"curl_m3u8/0.6"};
 
     if(cmdline.verbose_flag)
       curl.set_verbose();
@@ -116,16 +130,13 @@ int main(int argc, char** argv)
     assert(not m3u8.contains_relative_urls());
 
     //
-    // 2. Download all video-parts in the m3u8-file.
+    // 2. Download all video-parts from the m3u8-file.
     //
 
     curl.set_default_progressmeter();
 
-    size_t ndigits = 1;
-    while(std::pow(10, ndigits) < m3u8.get_urls().size())
-      ndigits++;
-
     std::vector<std::tuple<std::filesystem::path, std::string>> pathurls = {};
+    size_t const ndigits = calc_numberlength(m3u8.get_urls().size());
     int i=1;
     for(auto url : m3u8.get_urls())
     {
@@ -136,17 +147,73 @@ int main(int argc, char** argv)
     }
 
     auto results = curl.download_files(pathurls);
-    //curl_wrapper::results_t results;
-    //for(auto const& [part, url] : pathurls)
-    //  results.succeeded_files.push_back(part);
+
+    std::cout << std::format("successful downloads: {}", results.succeeded_files.size()) << std::endl;
+    std::cout << std::format("    failed downloads: {}", results.errors.size()) << std::endl;
+    std::cout << std::format("          of overall: {} urls", pathurls.size()) << std::endl;
+
+    // If there were download errors, but only for a few files (less than 10%)
+    // -> try to download them again.
+    while(results.errors.size() > 0 and results.succeeded_files.size() > 0
+        and static_cast<double>(results.errors.size())/static_cast<double>(results.succeeded_files.size()) < 0.1)
+    {
+      using namespace std::chrono_literals;
+
+      std::cout << "Couldn't download some files due to errors. Try them again." << std::endl;
+      std::this_thread::sleep_for(1s);
+
+      std::vector<std::tuple<std::filesystem::path, std::string>> rest = {};
+      for(auto error : results.errors)
+        rest.push_back(std::make_tuple(error.filename(), error.url()));
+
+      results = curl.download_files(rest);
+    }
+
     if(results.errors.size() > 0)
-      throw results.errors;
+    {
+      double const error_ratio = static_cast<double>(results.errors.size())/static_cast<double>(pathurls.size());
+      if(error_ratio < 0.01)
+      {
+         std::cerr
+           << std::format("Warning: Ignore download errors in less than {:.0f}% of the files.", error_ratio*100.0)
+           << std::endl;
+
+         // filter
+         for(auto const& error : results.errors)
+         {
+           auto it = std::find(pathurls.begin(), pathurls.end(), std::make_tuple(error.filename(), error.url()));
+           assert(it != pathurls.end() and "Couldn't find result in path-urls?!");
+           pathurls.erase(it);
+           std::remove(error.filename().c_str());
+         }
+      }
+      else
+        throw results.errors;
+    }
 
     //
     // 3. Concat and convert all video-parts to mp4 via ffmpeg.
     //
 
-    ret = concat_ffmpeg(name, results.succeeded_files);
+    std::vector<std::filesystem::path> paths = {};
+    for(auto pathurl : pathurls)
+      paths.push_back(std::get<0>(pathurl));
+
+    bool has_pngfakeheader = false;
+    for(auto path : paths)
+    {
+      auto haspng_error = check_and_remove_pngfakeheader(path);
+      if(std::holds_alternative<std::filesystem::filesystem_error>(haspng_error))
+        throw std::get<std::filesystem::filesystem_error>(haspng_error);
+
+      if(std::get<bool>(haspng_error))
+        has_pngfakeheader = true;
+    }
+
+    if(has_pngfakeheader)
+      std::cout << "Found and removed PNG fake-header(s)." << std::endl;
+
+    ret = concat_ffmpeg(name, paths);
   }
   catch(std::filesystem::filesystem_error const& error)
   {
@@ -156,18 +223,18 @@ int main(int argc, char** argv)
   catch(curl_wrapper_error const& error)
   {
     if(not error.filename().empty())
-      std::cerr << std::format("Error: {} while downloading {}!", error.what(), error.filename()) << std::endl;
+      std::cerr << std::format("Error: {} while downloading {} to {}!", error.what(), error.url(), error.filename()) << std::endl;
     else
-      std::cerr << std::format("Error: {}!", error.what()) << std::endl;
+      std::cerr << std::format("Error: {} while downloading {}!", error.what(), error.url()) << std::endl;
     ret = -4;
   }
   catch(std::vector<curl_wrapper_error> const& errors)
   {
     for(auto const& error : errors)
       if(not error.filename().empty())
-        std::cerr << std::format("Error: {} while downloading {}!", error.what(), error.filename()) << std::endl;
+        std::cerr << std::format("Error: {} while downloading {} to {}!", error.what(), error.url(), error.filename()) << std::endl;
       else
-        std::cerr << std::format("Error: {}!", error.what()) << std::endl;
+        std::cerr << std::format("Error: {} while downloading {}!", error.what(), error.url()) << std::endl;
     ret = -4;
   }
   catch(m3u8_errc const& error)
@@ -194,6 +261,7 @@ auto download_m3u8(curl_wrapper const& curl, std::string const& url) -> m3u8_t
 
   assert(std::holds_alternative<std::vector<char>>(result));
   auto buffer = std::get<std::vector<char>>(result);
+  //std::ranges::copy(buffer, std::ostream_iterator<char>(std::cout, ""));
 
   if(not is_m3u8(buffer))
   {
@@ -202,15 +270,26 @@ auto download_m3u8(curl_wrapper const& curl, std::string const& url) -> m3u8_t
     if(is_html)
       print_lines(page, 10);
 
-    //std::ranges::copy(buffer, std::ostream_iterator<char>(std::cout, ""));
     throw m3u8_errc::wrong_file_format;
   }
 
   m3u8_t m3u8{buffer};
-  if(m3u8.contains_relative_urls())
+  if((not m3u8.get_urls().empty()) and m3u8.contains_relative_urls())
   {
-    std::string const& host = get_baseurl(url);
-    m3u8.set_baseurl(host);
+    // If m3u8 contain only relative filenames than prefix them with the url-path ...
+    // (The relative filename is a relative path with only the filename e.g. "file1".)
+    if(std::regex_match(m3u8.get_url(0).url, std::regex("^[\\w.-]+$")))
+    {
+      std::string const& path = get_urlpath(url);
+      m3u8.set_urlprefix(path);
+    }
+    // ... otherwise if it contains real relative paths only prefix them with the server
+    // (server = protocol + host) in this case.
+    else
+    {
+      std::string const& server = get_urlbase(url);
+      m3u8.set_urlprefix(server);
+    }
   }
 
   return m3u8;
@@ -231,7 +310,6 @@ void print_lines(std::string const& str, int maxlines)
 
 auto pick_playlist(m3u8_t const& m3u8) -> int
 {
-  std::cout << "is master" << std::endl;
   assert(m3u8.is_master());
 
   constexpr char CTRLC = 0x03;
@@ -313,6 +391,8 @@ int concat_ffmpeg(std::string const& name, std::vector<std::filesystem::path> co
     std::error_code errc{err, std::generic_category()};
     throw std::filesystem::filesystem_error{"Couldn't write file", listfilename, errc};
   }
+
+  listfile.close();
 
   // ---
 

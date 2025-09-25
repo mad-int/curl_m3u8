@@ -5,6 +5,7 @@
 #include <fstream>
 #include <ranges>
 #include <regex>
+#include <system_error> // std::error_code
 #include <variant>
 
 #include <format>
@@ -54,7 +55,6 @@ void m3u8_t::parse_m3u8(std::istream& istream)
 
       m_master = true;
     }
-
     else if(line.starts_with("#EXTINF:"))
     {
       auto props = parse_extinf(line);
@@ -65,9 +65,6 @@ void m3u8_t::parse_m3u8(std::istream& istream)
     }
     else if(not line.starts_with("#") and not line.empty())
     {
-      //int const w = 15;
-      //std::cerr << std::format("{:.<{}}", (line.size() > w ? line.substr(0, w-3) : line), w) << std::endl;
-
       urls.push_back(urlprops_t{line, properties});
       properties = {};
     }
@@ -313,7 +310,7 @@ bool is_absolute_url(urlprops_t const& urlprops)
   return std::regex_match(urlprops.url, std::regex("^\\w{3,5}://.*$"));
 }
 
-auto get_baseurl(std::string const& url) -> std::string
+auto get_urlbase(std::string const& url) -> std::string
 {
   std::smatch results;
   if(std::regex_match(url, results, std::regex("^(\\w{3,5}://[^/]*)/.*$")))
@@ -321,17 +318,30 @@ auto get_baseurl(std::string const& url) -> std::string
   return "";
 }
 
-void m3u8_t::set_baseurl(std::string const& baseurl)
+auto get_urlpath(std::string const& url) -> std::string
 {
+  auto const pos = url.find_last_of('/');
+  return pos != std::string::npos ? url.substr(0, pos) : "";
+}
+
+void m3u8_t::set_urlprefix(std::string const& prefix)
+{
+  assert(not prefix.empty());
+
   for(auto& url : m_urls)
   {
+    assert(not url.url.empty());
+
     if(not is_absolute_url(url))
     {
-      if(baseurl.ends_with('/') and url.url.starts_with('/'))
+      auto prefix_length = prefix.length();
+      while(prefix.substr(0, prefix_length).ends_with('/'))
+        prefix_length--;
+
+      while(url.url.starts_with('/'))
         url.url.erase(url.url.begin());
 
-      bool has_delim = baseurl.ends_with('/') or url.url.starts_with('/');
-      url.url = baseurl + (has_delim ? "" : "/") + url.url;
+      url.url = prefix.substr(0, prefix_length) +  "/" + url.url;
     }
   }
 }

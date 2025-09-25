@@ -16,9 +16,13 @@
 auto is_m3u8(std::filesystem::path const& path) -> std::variant<bool, std::filesystem::filesystem_error>;
 auto is_m3u8(std::vector<char> const& buffer) -> bool;
 
-//! Get the baseurl from a complete url.
-//! The baseurl is the protocol + the host.
-auto get_baseurl(std::string const& url) -> std::string;
+//! Get the url-base from a complete url.
+//! The url-base is the protocol + the host only.
+auto get_urlbase(std::string const& url) -> std::string;
+
+//! Get the url-path from a complete url.
+//! The url-path is everything except the filename at the end.
+auto get_urlpath(std::string const& url) -> std::string;
 
 //! See std::io_errc or std::future_errc how this can be extended.
 enum class m3u8_errc
@@ -55,7 +59,8 @@ public:
   bool contains_absolute_urls() const;
   bool contains_relative_urls() const;
 
-  void set_baseurl(std::string const& baseurl);
+  //! For relative urls set the prefix (base-or path-url) to make the absolute urls.
+  void set_urlprefix(std::string const& prefix);
 
   // For testing.
   explicit m3u8_t(std::vector<urlprops_t> urls);

@@ -106,5 +106,4 @@ auto calc_progressbar_undefined(size_t secs, std::string const& cursor, size_t b
 
 auto shorten_bytes(size_t const& bytes) -> std::tuple<double, std::string>;
 auto shorten_string(std::string const& str, size_t const& maxlen) -> std::string;
-auto calc_numberlength(size_t number) -> size_t;
 

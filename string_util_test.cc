@@ -28,3 +28,20 @@ TEST(string_util_tests, tokenize)
   EXPECT_EQ(tokens2[1], "token2");
 }
 
+TEST(string_util_tests, calc_numberlength)
+{
+  EXPECT_EQ(calc_numberlength(      0), 1);
+  EXPECT_EQ(calc_numberlength(      5), 1);
+  EXPECT_EQ(calc_numberlength(      9), 1);
+  EXPECT_EQ(calc_numberlength(     10), 2);
+  EXPECT_EQ(calc_numberlength(     50), 2);
+  EXPECT_EQ(calc_numberlength(     99), 2);
+  EXPECT_EQ(calc_numberlength(    100), 3);
+
+  EXPECT_EQ(calc_numberlength(    500), 3);
+  EXPECT_EQ(calc_numberlength(   1500), 4);
+  EXPECT_EQ(calc_numberlength(  10500), 5);
+  EXPECT_EQ(calc_numberlength( 100500), 6);
+  EXPECT_EQ(calc_numberlength(1000500), 7);
+}
+

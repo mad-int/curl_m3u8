@@ -53,3 +53,18 @@ static inline auto tokenize(std::string s, char delim = ',') -> std::vector<std:
   return ret;
 }
 
+/**
+ * Calculate the length in digits of a number.
+ */
+static inline auto calc_numberlength(size_t number) -> int
+{
+  int len = 1;
+  while(number >= 10)
+  {
+    len++;
+    number /= 10;
+  }
+
+  return len;
+}
+
